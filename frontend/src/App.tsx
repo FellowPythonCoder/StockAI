@@ -79,6 +79,7 @@ export const App: React.FC = () => {
 
   // Homepage interactive preview state
   const [previewTicker, setPreviewTicker] = useState<string>('VELX');
+  const [previewHorizon, setPreviewHorizon] = useState<HorizonCode>('5d');
   const [previewTimeframe, setPreviewTimeframe] = useState<TimeframeCode>('3M');
   const [previewAnalysis, setPreviewAnalysis] = useState<StockAnalysisResponse | null>(null);
   const [previewChart, setPreviewChart] = useState<ChartSeriesResponse | null>(null);
@@ -172,7 +173,7 @@ export const App: React.FC = () => {
     let cancelled = false;
     setPreviewSimOverlay(null);
     Promise.all([
-      fetchStockAnalysis(previewTicker, '5d', false),
+      fetchStockAnalysis(previewTicker, previewHorizon, false),
       fetchStockChart(previewTicker, previewTimeframe, false),
     ])
       .then(([an, ch]) => {
@@ -185,7 +186,7 @@ export const App: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [previewTicker, previewTimeframe]);
+  }, [previewTicker, previewHorizon, previewTimeframe]);
 
   // Main Active Stock Loader
   const loadActiveAnalysis = useCallback(async (sym: string, hor: HorizonCode, forceRefresh = false) => {
@@ -307,6 +308,7 @@ export const App: React.FC = () => {
             livePrice: latestBar.close,
             startPrice: locked.starting_price,
             predictedUp: locked.expected_return_pct >= 0,
+            lockedReturnPct: locked.expected_return_pct,
           });
           await sleep(frameDelay);
         }
@@ -360,7 +362,7 @@ export const App: React.FC = () => {
       const baseChart =
         activeTf === previewTimeframe ? previewChart : await fetchStockChart(previewTicker, activeTf, false);
       const baseBars = [...baseChart.bars];
-      const resp = await advanceStockCandles(previewTicker, '5d', customSteps, activeTf);
+      const resp = await advanceStockCandles(previewTicker, previewHorizon, customSteps, activeTf);
       const genBars = resp.generated_bars;
       const locked = resp.locked_forecast;
 
@@ -375,18 +377,21 @@ export const App: React.FC = () => {
       };
       setPreviewSimOverlay(overlayBase);
 
-      for (let i = 0; i < genBars.length; i++) {
-        const partial = [...baseBars, ...genBars.slice(0, i + 1)].slice(-Math.max(baseBars.length, 40));
+      const stride = genBars.length > 30 ? Math.ceil(genBars.length / 24) : 1;
+      for (let i = 0; i < genBars.length; i += stride) {
+        const endIdx = Math.min(genBars.length, i + stride);
+        const partial = [...baseBars, ...genBars.slice(0, endIdx)].slice(-Math.max(baseBars.length, 40));
         setPreviewChart({ ...baseChart, bars: partial });
         setPreviewProgress({
           isAnimating: true,
-          currentStep: i + 1,
+          currentStep: endIdx,
           totalSteps: genBars.length,
-          livePrice: genBars[i].close,
+          livePrice: genBars[endIdx - 1].close,
           startPrice: locked.starting_price,
           predictedUp: locked.expected_return_pct >= 0,
+          lockedReturnPct: locked.expected_return_pct,
         });
-        await sleep(160);
+        await sleep(genBars.length > 12 ? 90 : 160);
       }
 
       setPreviewProgress(null);
@@ -405,7 +410,7 @@ export const App: React.FC = () => {
       }
       fetchTrackedForecasts().then(setTrackedRecords).catch(() => null);
     },
-    [activeTicker, previewAnalysis, previewChart, previewTicker, previewTimeframe]
+    [activeTicker, previewAnalysis, previewChart, previewHorizon, previewTicker, previewTimeframe]
   );
 
   const handleSelectStockFromAnywhere = (ticker: string, horizon?: HorizonCode) => {
@@ -465,6 +470,8 @@ export const App: React.FC = () => {
               registerRecentTicker(sym);
               setPreviewTicker(sym);
             }}
+            previewHorizon={previewHorizon}
+            onChangePreviewHorizon={setPreviewHorizon}
             previewAnalysis={previewAnalysis}
             previewChart={previewChart}
             previewTimeframe={previewTimeframe}

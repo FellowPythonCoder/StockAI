@@ -260,6 +260,9 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
             {/* Interactive Candle Simulator & AI Accuracy Checker Bar */}
             <CandleSimulatorPanel
               forecast={fc}
+              allHorizons={analysis.all_horizons_summary}
+              selectedHorizon={selectedHorizon}
+              onSelectHorizon={onSelectHorizon}
               regime={regime}
               onChangeRegime={onChangeRegime}
               onGenerateRandomStock={onGenerateRandomStock}

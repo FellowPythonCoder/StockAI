@@ -1,4 +1,4 @@
-"""Live Multi-Horizon Quantitative Stock Forecasting Engine."""
+"""Live Multi-Horizon Quantitative Stock Forecasting Engine (20-Factor Super-Ensemble)."""
 
 from __future__ import annotations
 
@@ -27,10 +27,10 @@ from .features import FEATURE_COLUMNS, build_causal_feature_frame
 
 FACTOR_META: dict[str, tuple[str, str, str]] = {
     "ret_1d": ("1-Day Return Impulse", "momentum", "Single-session short-term reversal / continuation pressure"),
-    "ret_5d": ("5-Day Momentum", "momentum", "Weekly return velocity and short-horizon mean-reversion balance"),
+    "ret_5d": ("5-Day Momentum", "momentum", "Weekly return velocity and short-horizon momentum persistence"),
     "ret_21d": ("21-Day Trend Return", "momentum", "Monthly price momentum across institutional rebalancing window"),
     "ret_63d": ("63-Day Quarterly Trend", "momentum", "Quarterly medium-term directional persistence"),
-    "dist_sma20": ("Price vs 20d SMA", "trend", "Short-term moving average extension"),
+    "dist_sma20": ("Price vs 20d SMA", "trend", "Short-term moving average equilibrium extension"),
     "dist_sma50": ("Price vs 50d SMA", "trend", "Intermediate institutional trend alignment"),
     "dist_sma200": ("Price vs 200d SMA", "trend", "Primary secular trend regime anchor"),
     "macd_norm": ("Normalized MACD Spread", "momentum", "12/26-day EMA convergence-divergence momentum"),
@@ -42,6 +42,10 @@ FACTOR_META: dict[str, tuple[str, str, str]] = {
     "rel_vol_20": ("Relative Volume (20d)", "volume", "Participation intensity vs 20-session average turnover"),
     "market_alpha_21d": ("Beta-Adjusted MSX 500 Alpha", "relative_strength", "Idiosyncratic 21-day return net of rolling synthetic market beta"),
     "sector_rel_21d": ("Sector Relative Strength", "relative_strength", "21-day performance spread vs synthetic sector index"),
+    "clv_5d": ("5-Candle Order-Flow Pressure", "volume", "Exponential close-location value measuring intrabar buying vs selling wicks"),
+    "vol_mom_5d": ("Volume-Confirmed Thrust", "volume", "5-day return amplified by relative institutional turnover conviction"),
+    "kalman_drift_z": ("Adaptive Kalman Regime Drift", "trend", "Volatility-normalized local exponential drift tracking active trend inflections"),
+    "regime_mom_interact": ("Autocorrelation Regime Signal", "momentum", "Switches automatically between momentum continuation and range mean-reversion"),
 }
 
 
@@ -71,9 +75,14 @@ def generate_horizon_forecast_and_backtest(
     news: list[NewsDevelopment],
     provenance: DataProvenance,
     horizon_code: HorizonCode,
+    precomputed_feat_df: Optional[pd.DataFrame] = None,
 ) -> tuple[HorizonForecast, HorizonBacktestReport]:
     horizon_label, h = HORIZON_SPECS[horizon_code]
-    feat_df = build_causal_feature_frame(stock_df, spy_df=spy_df, sector_df=sector_df)
+    feat_df = (
+        precomputed_feat_df
+        if precomputed_feat_df is not None
+        else build_causal_feature_frame(stock_df, spy_df=spy_df, sector_df=sector_df)
+    )
     wf: WalkForwardArtifacts = run_walk_forward_pipeline(ticker, feat_df, horizon_code)
 
     latest = feat_df.iloc[-1]
@@ -87,11 +96,12 @@ def generate_horizon_forecast_and_backtest(
     x_latest = feat_df[FEATURE_COLUMNS].iloc[-1:].fillna(0.0).to_numpy(dtype=float)
     x_latest_std = wf.final_scaler.transform(x_latest)
 
-    z_ridge = float(np.clip(wf.final_ridge.predict(x_latest_std)[0] * 0.65, -1.5, 1.5))
+    z_ridge = float(np.clip(wf.final_ridge.predict(x_latest_std)[0] * 0.85, -1.85, 1.85))
     z_state = float(_damped_state_predict_z(feat_df.iloc[-1:], h, wf.historical_mean_daily_log_ret, avg_vol)[0])
 
     if wf.selected_model_key == "ensemble":
-        pred_z = 0.5 * z_ridge + 0.5 * z_state
+        w_r = wf.ensemble_ridge_weight
+        pred_z = w_r * z_ridge + (1.0 - w_r) * z_state
     elif wf.selected_model_key == "ridge":
         pred_z = z_ridge
     else:
@@ -106,7 +116,6 @@ def generate_horizon_forecast_and_backtest(
             earnings_in_window = True
             earnings_dt_in_win = ed
 
-    # Diffusive horizon scale + discrete earnings jump variance if scheduled in window
     diffusive_var = (sigma_daily ** 2) * float(h)
     jump_var = (1.65 * sigma_daily) ** 2 if earnings_in_window else 0.0
     effective_scale_h = float(np.sqrt(diffusive_var + jump_var))
@@ -121,8 +130,7 @@ def generate_horizon_forecast_and_backtest(
     range_90_low = spot_price * float(np.exp(expected_log_ret + wf.conformal_q05 * effective_scale_h))
     range_90_high = spot_price * float(np.exp(expected_log_ret + wf.conformal_q95 * effective_scale_h))
 
-    # Direction classification: require expected move to exceed noise threshold relative to horizon vol
-    noise_deadband_pct = max(0.22, 0.14 * pure_diffusive_scale_h * 100.0)
+    noise_deadband_pct = max(0.18, 0.11 * pure_diffusive_scale_h * 100.0)
     if expected_return_pct >= noise_deadband_pct:
         direction: ForecastDirection = "upside"
         direction_label = "Potential upside"
@@ -137,18 +145,31 @@ def generate_horizon_forecast_and_backtest(
     if wf.calibrator.sample_size >= 40:
         prob_higher = round(wf.calibrator.predict_prob_up(pred_z) * 100.0, 1)
 
-    # Extract factor contributions for transparency
-    coefs = wf.final_ridge.coef_ * 0.65
+    coefs = wf.final_ridge.coef_ * 0.85
     std_vals = x_latest_std[0]
     contribs_raw: list[FactorContribution] = []
     for idx_f, col_name in enumerate(FEATURE_COLUMNS):
         w = float(coefs[idx_f] * std_vals[idx_f])
         raw_v = float(latest[col_name]) if pd.notna(latest[col_name]) else 0.0
         title, cat, desc = FACTOR_META[col_name]
-        if col_name in ("ret_1d", "ret_5d", "ret_21d", "ret_63d", "dist_sma20", "dist_sma50", "dist_sma200", "ewma_vol_ann", "market_alpha_21d", "sector_rel_21d"):
+        if col_name in (
+            "ret_1d",
+            "ret_5d",
+            "ret_21d",
+            "ret_63d",
+            "dist_sma20",
+            "dist_sma50",
+            "dist_sma200",
+            "ewma_vol_ann",
+            "market_alpha_21d",
+            "sector_rel_21d",
+            "vol_mom_5d",
+        ):
             val_fmt = f"{raw_v * 100.0:+.2f}%" if "ewma" not in col_name else f"{raw_v * 100.0:.1f}%"
         elif col_name == "rsi_centered":
             val_fmt = f"RSI {float(latest['rsi14']):.1f}"
+        elif col_name in ("kalman_drift_z", "regime_mom_interact"):
+            val_fmt = f"{raw_v:+.2f}σ"
         else:
             val_fmt = f"{raw_v:+.2f}"
 
@@ -166,7 +187,6 @@ def generate_horizon_forecast_and_backtest(
 
     contribs_sorted = sorted(contribs_raw, key=lambda c: abs(c.standardized_weight), reverse=True)[:8]
 
-    # Build smooth multi-step forecast cone trajectory for chart rendering
     trajectory: list[ForecastTrajectoryPoint] = [
         ForecastTrajectoryPoint(
             date=spot_date,
@@ -192,7 +212,6 @@ def generate_horizon_forecast_and_backtest(
         frac = s / float(h)
         step_dt = advance_trading_days(spot_date, s)
         step_exp_log = expected_log_ret * frac
-        # Include discrete jump variance once step crosses scheduled earnings date
         has_jump = earnings_in_window and earnings_dt_in_win is not None and step_dt >= earnings_dt_in_win
         step_scale = float(np.sqrt((sigma_daily ** 2) * float(s) + (jump_var if has_jump else 0.0)))
         trajectory.append(

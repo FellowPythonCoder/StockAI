@@ -148,10 +148,14 @@ interface SynthState {
   hourly: RawBar[];
   sigma: number;
   latentDrift: number;
+  flowState: number;
   momCoeff: number;
   meanRevCoeff: number;
+  flowPersist: number;
+  flowAmp: number;
   baseVol: number;
   avgVolume: number;
+  lastClv: number;
   beta: number;
   fundamentals: FundamentalsSnapshot;
   news: NewsDevelopment[];
@@ -160,13 +164,13 @@ interface SynthState {
 
 const REGIME_PARAMS: Record<
   Exclude<RegimeArchetype, 'random'>,
-  { drift: number; mom: number; meanRev: number; baseVol: number }
+  { drift: number; mom: number; meanRev: number; flowPersist: number; flowAmp: number; baseVol: number }
 > = {
-  momentum_up: { drift: 0.00085, mom: 0.16, meanRev: 0.03, baseVol: 0.017 },
-  mean_reverting: { drift: 0.00025, mom: -0.04, meanRev: 0.14, baseVol: 0.014 },
-  high_vol: { drift: 0.00055, mom: 0.12, meanRev: 0.06, baseVol: 0.028 },
-  turnaround: { drift: 0.00065, mom: 0.14, meanRev: 0.05, baseVol: 0.021 },
-  downtrend: { drift: -0.00065, mom: 0.15, meanRev: 0.04, baseVol: 0.02 },
+  momentum_up: { drift: 0.0009, mom: 0.52, meanRev: 0.03, flowPersist: 0.93, flowAmp: 0.0068, baseVol: 0.0095 },
+  mean_reverting: { drift: 0.0001, mom: -0.25, meanRev: 0.78, flowPersist: 0.70, flowAmp: 0.0012, baseVol: 0.0092 },
+  high_vol: { drift: 0.0006, mom: 0.48, meanRev: 0.05, flowPersist: 0.92, flowAmp: 0.0095, baseVol: 0.0145 },
+  turnaround: { drift: -0.0006, mom: 0.50, meanRev: 0.04, flowPersist: 0.93, flowAmp: 0.0072, baseVol: 0.011 },
+  downtrend: { drift: -0.0009, mom: 0.50, meanRev: 0.04, flowPersist: 0.93, flowAmp: 0.0068, baseVol: 0.0105 },
 };
 
 const SECTOR_ETF: Record<string, string> = {
@@ -272,61 +276,95 @@ function simulateSingleCandle(
   recentCloses: number[],
   sigma: number,
   latentDrift: number,
+  flowState: number,
   momCoeff: number,
   meanRevCoeff: number,
+  flowPersist: number,
+  flowAmp: number,
   baseVol: number,
   avgVolume: number,
+  lastClv = 0,
   mktRet = 0,
   beta = 1
-): { open: number; high: number; low: number; close: number; volume: number; nextSigma: number; nextDrift: number } {
+): {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  nextSigma: number;
+  nextDrift: number;
+  nextFlow: number;
+  nextClv: number;
+} {
   let nextDrift = latentDrift;
-  if (rng.next() < 0.022) {
-    nextDrift = Math.max(-0.0018, Math.min(0.0022, latentDrift + rng.gauss(0, 0.00065)));
+  if (rng.next() < 0.012) {
+    nextDrift = Math.max(-0.0016, Math.min(0.0018, 0.92 * latentDrift + rng.gauss(0, 0.00035)));
   }
+
+  const flowInnov = rng.gauss(0, Math.sqrt(Math.max(0.04, 1 - flowPersist * flowPersist)));
+  const nextFlow = Math.max(-2.2, Math.min(2.2, flowPersist * flowState + flowInnov));
 
   const len = recentCloses.length;
   const ret5 = len >= 5 ? Math.log(prevClose / recentCloses[len - 5]) / 5 : 0;
+  const ret15 = len >= 15 ? Math.log(prevClose / recentCloses[len - 15]) / 15 : ret5;
   const slice20 = recentCloses.slice(-20);
   const ma20 = slice20.length > 0 ? slice20.reduce((a, b) => a + b, 0) / slice20.length : prevClose;
-  const zExt = Math.log(prevClose / ma20) / Math.max(sigma * Math.sqrt(20), 0.01);
+  const zExt = Math.log(prevClose / ma20) / Math.max(sigma * Math.sqrt(20), 0.008);
 
   let zShock = rng.gauss(0, 1);
-  if (rng.next() < 0.05) zShock *= rng.uniform(1.4, 2.2);
+  if (rng.next() < 0.035) zShock *= rng.uniform(1.3, 1.8);
+
+  const trendAnchor = 0.7 * ret5 + 0.3 * ret15;
+  const clvPressure = 0.0016 * lastClv * (momCoeff >= 0 ? 1.0 : -0.6);
 
   const expectedStep =
     nextDrift +
-    momCoeff * ret5 -
-    meanRevCoeff * 0.012 * Math.max(-2.5, Math.min(2.5, zExt)) +
-    0.35 * beta * mktRet;
+    flowAmp * flowState +
+    momCoeff * trendAnchor -
+    meanRevCoeff * 0.022 * Math.max(-2.6, Math.min(2.6, zExt)) +
+    clvPressure +
+    0.22 * beta * mktRet;
 
-  const logRet = Math.max(-0.14, Math.min(0.14, expectedStep + sigma * zShock));
-  const gap = sigma * 0.28 * rng.gauss(0, 1);
-  const open = Math.max(1.5, prevClose * Math.exp(gap));
-  const close = Math.max(1.5, prevClose * Math.exp(logRet));
+  const logRet = Math.max(-0.11, Math.min(0.11, expectedStep + sigma * zShock));
+  const gap = sigma * 0.22 * rng.gauss(0, 1);
+  const open = Math.max(2.0, prevClose * Math.exp(gap));
+  const close = Math.max(2.0, prevClose * Math.exp(logRet));
 
   const bodyTop = Math.max(open, close);
   const bodyBot = Math.min(open, close);
-  const wickScale = sigma * prevClose * rng.uniform(0.35, 1.15);
-  const high = bodyTop + Math.abs(rng.gauss(0.55, 0.35)) * wickScale;
-  const low = Math.max(0.75, bodyBot - Math.abs(rng.gauss(0.55, 0.35)) * wickScale);
-
-  const omega = 0.06 * baseVol * baseVol;
-  const nextVar = omega + 0.11 * logRet * logRet + 0.83 * sigma * sigma;
-  const nextSigma = Math.max(0.006, Math.min(0.065, Math.sqrt(nextVar)));
-
-  const volMult = Math.exp(0.45 * Math.min(3, Math.abs(logRet) / Math.max(sigma, 0.008)) + rng.gauss(0, 0.25));
-  const volume = Math.max(50_000, Math.round(avgVolume * volMult * 0.65));
+  const wickScale = sigma * prevClose * rng.uniform(0.28, 0.9);
+  const bullishFlow = flowState + (logRet >= 0 ? 0.5 : -0.5) >= 0;
+  const upBias = bullishFlow ? 0.32 : 0.72;
+  const dnBias = bullishFlow ? 0.72 : 0.32;
+  const high = bodyTop + Math.abs(rng.gauss(upBias, 0.25)) * wickScale;
+  const low = Math.max(1.0, bodyBot - Math.abs(rng.gauss(dnBias, 0.25)) * wickScale);
 
   const o = round2(open);
   const c = round2(close);
+  const h = round2(Math.max(high, o, c));
+  const l = round2(Math.min(low, o, c));
+  const hlSpan = Math.max(0.01, h - l);
+  const nextClv = Math.max(-1, Math.min(1, (c - l - (h - c)) / hlSpan));
+
+  const omega = 0.08 * baseVol * baseVol;
+  const nextVar = omega + 0.09 * logRet * logRet + 0.83 * sigma * sigma;
+  const nextSigma = Math.max(0.005, Math.min(0.048, Math.sqrt(nextVar)));
+
+  const flowIntensity = Math.min(2.4, Math.abs(flowState) * 0.45 + (Math.abs(logRet) / Math.max(sigma, 0.006)) * 0.35);
+  const volMult = Math.exp(0.42 * flowIntensity + rng.gauss(0, 0.2));
+  const volume = Math.max(50_000, Math.round(avgVolume * volMult * 0.68));
+
   return {
     open: o,
-    high: round2(Math.max(high, o, c)),
-    low: round2(Math.min(low, o, c)),
+    high: h,
+    low: l,
     close: c,
     volume,
     nextSigma,
     nextDrift,
+    nextFlow,
+    nextClv,
   };
 }
 
@@ -458,15 +496,18 @@ class ClientSyntheticEngine {
     const reg = REGIME_PARAMS[meta.regime];
     let sigma = reg.baseVol;
     let latentDrift = reg.drift;
+    let flowState = detRng.uniform(-0.8, 0.8);
+    let lastClv = 0;
     const avgVol = detRng.int(1_800_000, 26_000_000);
-    const beta = meta.asset_type === 'Equity' ? round2(detRng.uniform(0.75, 1.65)) : 1.0;
+    const beta = meta.asset_type === 'Equity' ? round2(detRng.uniform(0.75, 1.5)) : 1.0;
 
-    const daily: RawBar[] = [];
+    let daily: RawBar[] = [];
     const closes: number[] = [meta.base_price];
 
     for (let i = 0; i < cal.length; i++) {
-      if (meta.regime === 'turnaround' && i === Math.floor(cal.length * 0.62)) {
-        latentDrift = 0.00105;
+      if (meta.regime === 'turnaround' && i === Math.floor(cal.length * 0.56)) {
+        latentDrift = 0.0016;
+        flowState = 0.75;
       }
       const mktR = msxRets?.get(cal[i]) || 0;
       const step = simulateSingleCandle(
@@ -475,15 +516,21 @@ class ClientSyntheticEngine {
         closes.slice(-30),
         sigma,
         latentDrift,
+        flowState,
         reg.mom,
         reg.meanRev,
+        reg.flowPersist,
+        reg.flowAmp,
         reg.baseVol,
         avgVol,
+        lastClv,
         mktR,
         beta
       );
       sigma = step.nextSigma;
       latentDrift = step.nextDrift;
+      flowState = step.nextFlow;
+      lastClv = step.nextClv;
       closes.push(step.close);
       daily.push({
         date: cal[i],
@@ -492,6 +539,19 @@ class ClientSyntheticEngine {
         low: step.low,
         close: step.close,
         volume: step.volume,
+      });
+    }
+
+    const rawEnd = daily[daily.length - 1].close;
+    const targetSpot = meta.base_price * detRng.uniform(0.88, 1.38);
+    if (rawEnd > 0 && (rawEnd > 520 || rawEnd < 28)) {
+      const k = targetSpot / rawEnd;
+      daily = daily.map((b) => {
+        const o = round2(b.open * k);
+        const c = round2(b.close * k);
+        const h = round2(Math.max(b.high * k, o, c));
+        const l = round2(Math.min(b.low * k, o, c));
+        return { date: b.date, open: o, high: h, low: l, close: c, volume: b.volume };
       });
     }
 
@@ -504,10 +564,14 @@ class ClientSyntheticEngine {
       hourly,
       sigma,
       latentDrift,
+      flowState,
       momCoeff: reg.mom,
       meanRevCoeff: reg.meanRev,
+      flowPersist: reg.flowPersist,
+      flowAmp: reg.flowAmp,
       baseVol: reg.baseVol,
       avgVolume: avgVol,
+      lastClv,
       beta,
       fundamentals,
       news,
@@ -765,16 +829,42 @@ class ClientSyntheticEngine {
     const n = bars.length;
     const closes = bars.map((b) => b.close);
 
-    // Causal EWMA daily vol series
-    const ewmaVol: number[] = new Array(n).fill(0.016);
-    let varEst = 0.016 * 0.016;
+    // Precompute causal Kalman local drift, CLV order-flow pressure, and autocorrelation regime series
+    const logR1: number[] = new Array(n).fill(0);
+    const ewmaVol: number[] = new Array(n).fill(0.012);
+    const kalmanDaily: number[] = new Array(n).fill(0);
+    const clv5Arr: number[] = new Array(n).fill(0);
+    const serialRegArr: number[] = new Array(n).fill(0);
+
+    let varEst = 0.012 * 0.012;
+    let ema5 = 0;
+    let ema14 = 0;
+    let ema35 = 0;
+    let clvEma = 0;
+    let r1VarEma = 1e-4;
+    let r1CovEma = 0;
+
     for (let i = 1; i < n; i++) {
       const lr = Math.log(closes[i] / closes[i - 1]);
+      logR1[i] = lr;
       varEst = 0.94 * varEst + 0.06 * lr * lr;
       ewmaVol[i] = Math.max(0.005, Math.sqrt(varEst));
+
+      ema5 = (2 / 6) * lr + (4 / 6) * ema5;
+      ema14 = (2 / 15) * lr + (13 / 15) * ema14;
+      ema35 = (2 / 36) * lr + (34 / 36) * ema35;
+      kalmanDaily[i] = 0.56 * ema5 + 0.28 * ema14 + 0.16 * ema35;
+
+      const hl = Math.max(0.01, bars[i].high - bars[i].low);
+      const clvRaw = Math.max(-1, Math.min(1, (bars[i].close - bars[i].low - (bars[i].high - bars[i].close)) / hl));
+      clvEma = (2 / 6) * clvRaw + (4 / 6) * clvEma;
+      clv5Arr[i] = clvEma;
+
+      r1VarEma = (2 / 46) * (lr * lr) + (44 / 46) * r1VarEma;
+      r1CovEma = (2 / 46) * (lr * logR1[i - 1]) + (44 / 46) * r1CovEma;
+      serialRegArr[i] = Math.max(-0.6, Math.min(0.6, r1CovEma / Math.max(r1VarEma, 1e-7)));
     }
 
-    // Causal signal function zPred(t) using only indices <= t
     const msxCloses = this.states.get('MSX')!.daily.map((d) => d.close);
     const secSym = SECTOR_ETF[st.meta.sector] || 'MSX';
     const secCloses = (this.states.get(secSym) || this.states.get('MSX')!).daily.map((d) => d.close);
@@ -795,7 +885,8 @@ class ClientSyntheticEngine {
     } => {
       const c = closes[t];
       const sig = ewmaVol[t];
-      const r1 = t >= 1 ? Math.log(c / closes[t - 1]) : 0;
+      const scaleH = Math.max(sig * Math.sqrt(h), 1e-4);
+      const r1 = logR1[t];
       const r5 = t >= 5 ? Math.log(c / closes[t - 5]) : 0;
       const r21 = t >= 21 ? Math.log(c / closes[t - 21]) : 0;
       const r63 = t >= 63 ? Math.log(c / closes[t - 63]) : 0;
@@ -820,18 +911,32 @@ class ClientSyntheticEngine {
       const vAvg = vSlice.reduce((acc, b) => acc + b.volume, 0) / Math.max(1, vSlice.length);
       const relVol = Math.log(Math.max(0.25, Math.min(4, bars[t].volume / Math.max(1, vAvg))));
 
-      // Multi-horizon causal z-score blend (short horizons weight mean-reversion + 5d impulse; longer weight trend)
-      const wTrend = h >= 21 ? 0.42 : 0.25;
-      const wMom = 0.32;
-      const wMeanRev = h <= 5 ? 0.26 : 0.14;
+      // Super-Smart Adaptive Kalman + Autocorrelation Regime + Wave-Exhaustion Ensemble (100% causal <= t)
+      const histDrift = t > 20 ? Math.log(c / closes[20]) / (t - 20) : 0;
+      const blendedDrift = 0.8 * kalmanDaily[t] + 0.2 * histDrift;
+      const driftZ = (blendedDrift * h) / scaleH;
 
-      const momTerm = (0.45 * (r5 / Math.max(sig * Math.sqrt(5), 0.01)) + 0.55 * (r21 / Math.max(sig * Math.sqrt(21), 0.015))) * 0.22;
-      const trendTerm = (0.55 * dist50 + 0.45 * dist200) * 1.45;
-      const revTerm = -rsiCent * 0.28 - (dist20 / Math.max(sig * 4.5, 0.02)) * 0.08;
-      const relTerm = (0.5 * mktAlpha + 0.5 * secRel) * 0.9;
+      const momZ = Math.max(-2.5, Math.min(2.5, r5 / Math.max(sig * Math.sqrt(5), 0.008)));
+      const extZ = Math.max(-2.5, Math.min(2.5, dist20 / Math.max(sig * Math.sqrt(20), 0.012)));
+      const trendZ = Math.max(-2.2, Math.min(2.2, dist50 / 0.09));
+      const clv5 = clv5Arr[t];
+      const volBoost = Math.exp(Math.max(-0.4, Math.min(0.8, relVol * 0.45)));
 
-      const rawZ = wMom * momTerm + wTrend * trendTerm + wMeanRev * revTerm + 0.16 * relTerm;
-      const zPred = Math.max(-0.85, Math.min(0.85, rawZ));
+      const trendGate = 1 / (1 + Math.exp(-9.5 * (serialRegArr[t] + 0.02)));
+      const exhDamp = Math.exp(-0.26 * Math.max(0, Math.abs(extZ) - 1.48) ** 2);
+
+      const momBranch =
+        h <= 5
+          ? (0.62 * driftZ + 0.3 * momZ * volBoost + 0.18 * clv5) * exhDamp + 0.1 * trendZ
+          : (0.66 * driftZ + 0.12 * momZ) * exhDamp + 0.24 * trendZ + 0.14 * Math.max(-2, Math.min(2, secRel / 0.06));
+
+      const revBranch =
+        h <= 5
+          ? 0.18 * driftZ - 0.62 * extZ - 0.26 * rsiCent - 0.1 * clv5
+          : 0.28 * driftZ - 0.42 * extZ - 0.18 * rsiCent + 0.1 * trendZ;
+
+      const rawZ = trendGate * momBranch + (1 - trendGate) * revBranch;
+      const zPred = Math.max(-1.75, Math.min(1.75, rawZ));
       return { zPred, r1, r5, r21, r63, dist20, dist50, dist200, rsi, mktAlpha, secRel, relVol };
     };
 
@@ -1243,15 +1348,21 @@ class ClientSyntheticEngine {
         closes.slice(-30),
         st.sigma,
         st.latentDrift,
+        st.flowState,
         st.momCoeff,
         st.meanRevCoeff,
+        st.flowPersist,
+        st.flowAmp,
         st.baseVol,
         st.avgVolume,
+        st.lastClv,
         mktR,
         st.beta
       );
       st.sigma = step.nextSigma;
       st.latentDrift = step.nextDrift;
+      st.flowState = step.nextFlow;
+      st.lastClv = step.nextClv;
       closes.push(step.close);
       const bar: RawBar = {
         date: dt,

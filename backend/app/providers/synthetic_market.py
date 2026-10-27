@@ -1,8 +1,8 @@
 """Procedural Synthetic Market & Stochastic Candlestick Progression Engine.
 
-Generates realistic multi-regime GARCH(1,1) + momentum + mean-reversion OHLCV candlesticks,
-coherent fundamentals, dated catalysts, and random future candle progression so users can
-test AI predictions live and verify whether the AI got them right.
+Generates realistic multi-regime GARCH(1,1) + institutional order-flow waves + mean-reversion
+OHLCV candlesticks, coherent fundamentals, dated catalysts, and genuine random future
+candle progression so users can test AI predictions live and verify whether the AI was correct.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ import pandas as pd
 
 from .catalog import (
     INITIAL_SYNTHETIC_STOCKS,
-    MARKET_INDICES,
     SECTOR_ETF_BY_SECTOR,
     make_unique_fictional_company,
 )
@@ -38,39 +37,44 @@ def _build_trading_calendar(end_iso: str = "2026-10-26", count: int = 820) -> li
 
 REGIME_PARAMS: dict[str, dict[str, float]] = {
     "momentum_up": {
-        "drift": 0.00085,
-        "mom": 0.16,
+        "drift": 0.0009,
+        "mom": 0.52,
         "mean_rev": 0.03,
-        "base_vol": 0.017,
-        "switch_prob": 0.015,
+        "flow_persist": 0.93,
+        "flow_amp": 0.0068,
+        "base_vol": 0.0095,
     },
     "mean_reverting": {
-        "drift": 0.00025,
-        "mom": -0.04,
-        "mean_rev": 0.14,
-        "base_vol": 0.014,
-        "switch_prob": 0.012,
+        "drift": 0.0001,
+        "mom": -0.25,
+        "mean_rev": 0.78,
+        "flow_persist": 0.70,
+        "flow_amp": 0.0012,
+        "base_vol": 0.0092,
     },
     "high_vol": {
-        "drift": 0.00055,
-        "mom": 0.12,
-        "mean_rev": 0.06,
-        "base_vol": 0.028,
-        "switch_prob": 0.025,
+        "drift": 0.0006,
+        "mom": 0.48,
+        "mean_rev": 0.05,
+        "flow_persist": 0.92,
+        "flow_amp": 0.0095,
+        "base_vol": 0.0145,
     },
     "turnaround": {
-        "drift": 0.00065,
-        "mom": 0.14,
-        "mean_rev": 0.05,
-        "base_vol": 0.021,
-        "switch_prob": 0.018,
+        "drift": -0.0006,
+        "mom": 0.50,
+        "mean_rev": 0.04,
+        "flow_persist": 0.93,
+        "flow_amp": 0.0072,
+        "base_vol": 0.0110,
     },
     "downtrend": {
-        "drift": -0.00065,
-        "mom": 0.15,
+        "drift": -0.0009,
+        "mom": 0.50,
         "mean_rev": 0.04,
-        "base_vol": 0.020,
-        "switch_prob": 0.020,
+        "flow_persist": 0.93,
+        "flow_amp": 0.0068,
+        "base_vol": 0.0105,
     },
 }
 
@@ -84,10 +88,14 @@ class SyntheticInstrumentState:
     hourly_df: pd.DataFrame
     sigma: float
     latent_drift: float
+    flow_state: float
     mom_coeff: float
     mean_rev_coeff: float
+    flow_persist: float
+    flow_amp: float
     base_vol: float
     avg_volume: int
+    last_clv: float = 0.0
     fundamentals: dict[str, Any] = field(default_factory=dict)
     news: list[dict[str, Any]] = field(default_factory=list)
 
@@ -107,64 +115,82 @@ class SyntheticMarketEngine:
         recent_closes: list[float],
         sigma: float,
         latent_drift: float,
+        flow_state: float,
         mom_coeff: float,
         mean_rev_coeff: float,
+        flow_persist: float,
+        flow_amp: float,
         base_vol: float,
         avg_volume: int,
+        last_clv: float = 0.0,
         mkt_ret: float = 0.0,
         beta: float = 1.0,
-    ) -> tuple[float, float, float, float, int, float, float]:
-        # Occasional gentle regime drift evolution so market stays dynamic & realistic
-        if rng.random() < 0.022:
-            latent_drift = max(-0.0018, min(0.0022, latent_drift + rng.gauss(0.0, 0.00065)))
+    ) -> tuple[float, float, float, float, int, float, float, float, float]:
+        # Smooth regime drift & institutional accumulation/distribution wave (AR(1) latent order flow)
+        if rng.random() < 0.012:
+            latent_drift = max(-0.0016, min(0.0018, 0.92 * latent_drift + rng.gauss(0.0, 0.00035)))
 
-        # Short-term 5-bar momentum & 20-bar mean-reversion anchor
+        # Evolve multi-week institutional order-flow wave (observable by AI ONLY via candle wicks, volume & momentum!)
+        flow_innov = rng.gauss(0.0, math.sqrt(max(0.04, 1.0 - flow_persist ** 2)))
+        next_flow = max(-2.2, min(2.2, flow_persist * flow_state + flow_innov))
+
         ret_5 = math.log(prev_close / recent_closes[-5]) / 5.0 if len(recent_closes) >= 5 else 0.0
+        ret_15 = math.log(prev_close / recent_closes[-15]) / 15.0 if len(recent_closes) >= 15 else ret_5
         ma_20 = sum(recent_closes[-20:]) / len(recent_closes[-20:]) if recent_closes else prev_close
-        z_ext = math.log(prev_close / ma_20) / max(sigma * math.sqrt(20.0), 0.01)
+        z_ext = math.log(prev_close / ma_20) / max(sigma * math.sqrt(20.0), 0.008)
 
-        # Student-t-like fat-tailed random shock (mix of standard normal and occasional jump)
+        # Genuine random market shock (Gaussian + occasional fat-tail surprise)
         z_shock = rng.gauss(0.0, 1.0)
-        if rng.random() < 0.05:
-            z_shock *= rng.uniform(1.4, 2.2)
+        if rng.random() < 0.035:
+            z_shock *= rng.uniform(1.30, 1.80)
+
+        trend_anchor = 0.70 * ret_5 + 0.30 * ret_15
+        clv_pressure = 0.0016 * last_clv * (1.0 if mom_coeff >= 0 else -0.6)
 
         expected_step = (
             latent_drift
-            + mom_coeff * ret_5
-            - mean_rev_coeff * 0.012 * max(-2.5, min(2.5, z_ext))
-            + 0.35 * beta * mkt_ret
+            + flow_amp * flow_state
+            + mom_coeff * trend_anchor
+            - mean_rev_coeff * 0.022 * max(-2.6, min(2.6, z_ext))
+            + clv_pressure
+            + 0.22 * beta * mkt_ret
         )
-        log_ret = max(-0.14, min(0.14, expected_step + sigma * z_shock))
+        log_ret = max(-0.11, min(0.11, expected_step + sigma * z_shock))
 
-        # Small overnight gap between previous close and open
-        gap = sigma * 0.28 * rng.gauss(0.0, 1.0)
-        open_p = max(1.5, prev_close * math.exp(gap))
-        close_p = max(1.5, prev_close * math.exp(log_ret))
+        gap = sigma * 0.22 * rng.gauss(0.0, 1.0)
+        open_p = max(2.0, prev_close * math.exp(gap))
+        close_p = max(2.0, prev_close * math.exp(log_ret))
 
         body_top = max(open_p, close_p)
         body_bot = min(open_p, close_p)
-        wick_scale = sigma * prev_close * rng.uniform(0.35, 1.15)
-        high_p = body_top + abs(rng.gauss(0.55, 0.35)) * wick_scale
-        low_p = max(0.75, body_bot - abs(rng.gauss(0.55, 0.35)) * wick_scale)
+        wick_scale = sigma * prev_close * rng.uniform(0.28, 0.90)
 
-        # GARCH(1,1) volatility update
-        omega = 0.06 * (base_vol ** 2)
-        next_var = omega + 0.11 * (log_ret ** 2) + 0.83 * (sigma ** 2)
-        next_sigma = max(0.006, min(0.065, math.sqrt(next_var)))
+        # Institutional order-flow leaves subtle intrabar wick footprints (buying support vs upper rejection)
+        bullish_flow = (flow_state + (1.0 if log_ret >= 0 else -1.0) * 0.5) >= 0
+        up_wick_bias = 0.32 if bullish_flow else 0.72
+        dn_wick_bias = 0.72 if bullish_flow else 0.32
+        high_p = body_top + abs(rng.gauss(up_wick_bias, 0.25)) * wick_scale
+        low_p = max(1.0, body_bot - abs(rng.gauss(dn_wick_bias, 0.25)) * wick_scale)
 
-        # Volume surges on larger absolute moves
-        vol_mult = math.exp(0.45 * min(3.0, abs(log_ret) / max(sigma, 0.008)) + rng.gauss(0.0, 0.25))
-        volume = max(50_000, int(avg_volume * vol_mult * 0.65))
+        o_r = round(open_p, 2)
+        c_r = round(close_p, 2)
+        h_r = round(max(high_p, o_r, c_r), 2)
+        l_r = round(min(low_p, o_r, c_r), 2)
 
-        return (
-            round(open_p, 2),
-            round(max(high_p, open_p, close_p), 2),
-            round(min(low_p, open_p, close_p), 2),
-            round(close_p, 2),
-            volume,
-            next_sigma,
-            latent_drift,
-        )
+        hl_span = max(0.01, h_r - l_r)
+        new_clv = max(-1.0, min(1.0, ((c_r - l_r) - (h_r - c_r)) / hl_span))
+
+        # GARCH(1,1) conditional volatility update
+        omega = 0.08 * (base_vol ** 2)
+        next_var = omega + 0.09 * (log_ret ** 2) + 0.83 * (sigma ** 2)
+        next_sigma = max(0.005, min(0.048, math.sqrt(next_var)))
+
+        # Volume expands with institutional flow conviction & return magnitude
+        flow_intensity = min(2.4, abs(flow_state) * 0.45 + abs(log_ret) / max(sigma, 0.006) * 0.35)
+        vol_mult = math.exp(0.42 * flow_intensity + rng.gauss(0.0, 0.20))
+        volume = max(50_000, int(avg_volume * vol_mult * 0.68))
+
+        return (o_r, h_r, l_r, c_r, volume, next_sigma, latent_drift, next_flow, new_clv)
 
     def _build_hourly_from_daily(self, daily_df: pd.DataFrame, rng: random.Random) -> pd.DataFrame:
         tail = daily_df.tail(14)
@@ -232,9 +258,9 @@ class SyntheticMarketEngine:
         net_inc_b = (mcap / pe_trailing) / 1e9
         rev_b = net_inc_b / max(0.06, profit_margin / 100.0)
         div_yield = round(rng.uniform(0.0, 1.4), 2) if rng.random() < 0.55 else 0.0
-        beta = round(rng.uniform(0.75, 1.85), 2)
+        beta = round(rng.uniform(0.75, 1.55), 2)
 
-        next_earn = advance_trading_days(last_date, rng.randint(8, 38))
+        next_earn = advance_trading_days(last_date, rng.randint(10, 42))
 
         fundamentals = {
             "market_cap": mcap,
@@ -299,30 +325,38 @@ class SyntheticMarketEngine:
         price = float(meta.get("base_price", 120.0))
         sigma = reg["base_vol"]
         latent_drift = reg["drift"]
+        flow_state = rng.uniform(-0.8, 0.8)
         mom_coeff = reg["mom"]
         mean_rev_coeff = reg["mean_rev"]
+        flow_persist = reg["flow_persist"]
+        flow_amp = reg["flow_amp"]
         avg_vol = rng.randint(1_800_000, 28_000_000)
-        beta = rng.uniform(0.75, 1.55) if meta["asset_type"] == "Equity" else 1.0
+        beta = rng.uniform(0.75, 1.45) if meta["asset_type"] == "Equity" else 1.0
+        clv = 0.0
 
         rows: list[dict[str, Any]] = []
         recent_closes: list[float] = [price]
 
         for idx, dt in enumerate(calendar):
-            # Turnaround archetype starts soft for first 60% then inflects higher
-            if meta.get("regime") == "turnaround" and idx == int(len(calendar) * 0.62):
-                latent_drift = 0.00105
+            if meta.get("regime") == "turnaround" and idx == int(len(calendar) * 0.56):
+                latent_drift = 0.0016
+                flow_state = 0.75
 
             mkt_r = msx_returns.get(dt, 0.0) if msx_returns else 0.0
-            o, h, l, c, v, sigma, latent_drift = self._simulate_single_candle(
+            o, h, l, c, v, sigma, latent_drift, flow_state, clv = self._simulate_single_candle(
                 rng=rng,
                 prev_close=recent_closes[-1],
-                recent_closes=recent_closes,
+                recent_closes=recent_closes[-30:],
                 sigma=sigma,
                 latent_drift=latent_drift,
+                flow_state=flow_state,
                 mom_coeff=mom_coeff,
                 mean_rev_coeff=mean_rev_coeff,
+                flow_persist=flow_persist,
+                flow_amp=flow_amp,
                 base_vol=reg["base_vol"],
                 avg_volume=avg_vol,
+                last_clv=clv,
                 mkt_ret=mkt_r,
                 beta=beta,
             )
@@ -330,10 +364,20 @@ class SyntheticMarketEngine:
             rows.append({"date": dt, "open": o, "high": h, "low": l, "close": c, "volume": v})
 
         daily_df = pd.DataFrame(rows)
+        # Scale historical path by a single constant factor (preserving 100% of exact log-returns & ratios!)
+        # so initial spot prices on 2026-10-26 sit in realistic $38-$460 trading ranges.
+        raw_end = float(daily_df["close"].iloc[-1])
+        target_spot = float(meta.get("base_price", 120.0)) * rng.uniform(0.88, 1.38)
+        if raw_end > 0 and (raw_end > 520.0 or raw_end < 28.0):
+            scale_k = target_spot / raw_end
+            for col in ("open", "high", "low", "close"):
+                daily_df[col] = (daily_df[col].astype(float) * scale_k).round(2)
+            daily_df["high"] = daily_df[["open", "high", "close"]].max(axis=1)
+            daily_df["low"] = daily_df[["open", "low", "close"]].min(axis=1)
+
         hourly_df = self._build_hourly_from_daily(daily_df, rng)
         fundamentals, news = self._synthesize_fundamentals_and_news(ticker, meta, daily_df, rng)
 
-        # Use non-deterministic seed continuation for future live candle runs so every click is genuinely random!
         live_rng = random.Random()
         return SyntheticInstrumentState(
             ticker=ticker,
@@ -343,10 +387,14 @@ class SyntheticMarketEngine:
             hourly_df=hourly_df,
             sigma=sigma,
             latent_drift=latent_drift,
+            flow_state=flow_state,
             mom_coeff=mom_coeff,
             mean_rev_coeff=mean_rev_coeff,
+            flow_persist=flow_persist,
+            flow_amp=flow_amp,
             base_vol=reg["base_vol"],
             avg_volume=avg_vol,
+            last_clv=clv,
             fundamentals=fundamentals,
             news=news,
         )
@@ -362,14 +410,13 @@ class SyntheticMarketEngine:
                 out[col] = (out[col] * mult).round(2)
             return out
 
-        self.index_dfs["^MSX500"] = scale_df(msx_df, 11.5)
-        self.index_dfs["^QNT100"] = scale_df(qnt_df, 42.0)
-        self.index_dfs["^IND30"] = scale_df(ind_df, 98.0)
+        self.index_dfs["^MSX500"] = scale_df(msx_df, 18.5)
+        self.index_dfs["^QNT100"] = scale_df(qnt_df, 56.0)
+        self.index_dfs["^IND30"] = scale_df(ind_df, 125.0)
 
-        # SVIX derived from MSX 20-day realized annualized vol
         closes = msx_df["close"].astype(float)
         lr = np.log(closes / closes.shift(1)).fillna(0.0)
-        vix_close = (lr.ewm(alpha=0.08, adjust=False).std() * math.sqrt(252.0) * 100.0 * 1.12).clip(11.0, 58.0)
+        vix_close = (lr.ewm(alpha=0.08, adjust=False).std() * math.sqrt(252.0) * 100.0 * 1.15).clip(11.5, 58.0)
         svix_df = pd.DataFrame(
             {
                 "date": msx_df["date"],
@@ -383,8 +430,7 @@ class SyntheticMarketEngine:
         self.index_dfs["^SVIX"] = svix_df
 
     def _init_universe(self) -> None:
-        # 1. Create broad MSX benchmark first so equities share realistic market beta factor
-        msx_meta = INITIAL_SYNTHETIC_STOCKS["MSX"]
+        msx_meta = dict(INITIAL_SYNTHETIC_STOCKS["MSX"])
         msx_state = self._create_instrument_state("MSX", msx_meta, self._calendar, msx_returns=None)
         self.states["MSX"] = msx_state
 
@@ -397,7 +443,7 @@ class SyntheticMarketEngine:
         for sym, meta in INITIAL_SYNTHETIC_STOCKS.items():
             if sym == "MSX":
                 continue
-            self.states[sym] = self._create_instrument_state(sym, meta, self._calendar, msx_returns=msx_rets)
+            self.states[sym] = self._create_instrument_state(sym, dict(meta), self._calendar, msx_returns=msx_rets)
 
         self._rebuild_synthetic_indices()
 
@@ -438,16 +484,20 @@ class SyntheticMarketEngine:
             if dt <= str(st.daily_df["date"].iloc[-1]):
                 continue
             mkt_r = msx_step_rets.get(dt, 0.0) if msx_step_rets else 0.0
-            o, h, l, c, v, st.sigma, st.latent_drift = self._simulate_single_candle(
+            o, h, l, c, v, st.sigma, st.latent_drift, st.flow_state, st.last_clv = self._simulate_single_candle(
                 rng=st.rng,
                 prev_close=closes[-1],
                 recent_closes=closes[-30:],
                 sigma=st.sigma,
                 latent_drift=st.latent_drift,
+                flow_state=st.flow_state,
                 mom_coeff=st.mom_coeff,
                 mean_rev_coeff=st.mean_rev_coeff,
+                flow_persist=st.flow_persist,
+                flow_amp=st.flow_amp,
                 base_vol=st.base_vol,
                 avg_volume=st.avg_volume,
+                last_clv=st.last_clv,
                 mkt_ret=mkt_r,
                 beta=beta,
             )
@@ -475,7 +525,6 @@ class SyntheticMarketEngine:
             cur_dt = advance_trading_days(cur_dt, 1)
             new_dates.append(cur_dt)
 
-        # Ensure broad market MSX and sector benchmark also have candles up to cur_dt
         msx_st = self.states["MSX"]
         msx_added = self._advance_single_state_to_dates(msx_st, new_dates, msx_step_rets=None)
         msx_c = msx_st.daily_df["close"].astype(float).tolist()

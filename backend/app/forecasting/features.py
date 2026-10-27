@@ -1,4 +1,4 @@
-"""Strictly causal quantitative feature matrix builder.
+"""Strictly causal quantitative feature matrix builder (20-factor Adaptive Microstructure & Regime Matrix).
 
 Every feature at row index `t` is computed exclusively from historical bars `0..t`.
 No forward shifts or full-sample scalers are ever applied here.
@@ -34,6 +34,10 @@ FEATURE_COLUMNS = [
     "rel_vol_20",
     "market_alpha_21d",
     "sector_rel_21d",
+    "clv_5d",
+    "vol_mom_5d",
+    "kalman_drift_z",
+    "regime_mom_interact",
 ]
 
 
@@ -64,7 +68,6 @@ def build_causal_feature_frame(
 
     df["dist_sma20"] = (close / sma20) - 1.0
     df["dist_sma50"] = (close / sma50) - 1.0
-    # Fall back gracefully to dist_sma50 when <200 bars exist on shorter histories
     df["dist_sma200"] = ((close / sma200) - 1.0).fillna(df["dist_sma50"])
 
     ema12 = compute_ema(close, 12)
@@ -92,6 +95,44 @@ def build_causal_feature_frame(
 
     vol_ma20 = vol.rolling(20, min_periods=5).mean().replace(0.0, np.nan)
     df["rel_vol_20"] = np.log((vol / vol_ma20).clip(lower=0.2, upper=5.0)).fillna(0.0)
+
+    # Smart Microstructure & Regime Features (100% causal: bars 0..t only)
+    hl_span = (high - low).clip(lower=0.01)
+    clv_raw = (((close - low) - (high - close)) / hl_span).clip(-1.0, 1.0)
+    df["clv_5d"] = clv_raw.ewm(span=5, adjust=False).mean().fillna(0.0)
+
+    vol_boost = np.exp(df["rel_vol_20"].clip(-0.5, 1.1))
+    df["vol_mom_5d"] = (df["ret_5d"].fillna(0.0) * vol_boost).clip(-0.35, 0.35)
+
+    # Fast Kalman local regime drift (responsive 5/14/35-candle multi-scale blend for instant wave detection!)
+    ema_drift_5 = log_ret_1d.fillna(0.0).ewm(span=5, adjust=False).mean()
+    ema_drift_14 = log_ret_1d.fillna(0.0).ewm(span=14, adjust=False).mean()
+    ema_drift_35 = log_ret_1d.fillna(0.0).ewm(span=35, adjust=False).mean()
+    local_drift = 0.56 * ema_drift_5 + 0.28 * ema_drift_14 + 0.16 * ema_drift_35
+    df["kalman_drift_daily"] = local_drift
+    df["kalman_drift_z"] = (local_drift / ewma_daily.clip(lower=0.004)).clip(-2.2, 2.2).fillna(0.0)
+
+    # Causal exponential serial autocorrelation regime detector (ultra-fast vectorized EWM):
+    # positive -> trending/momentum regime; negative -> mean-reverting range regime!
+    r1_clean = log_ret_1d.fillna(0.0)
+    r5_clean = df["ret_5d"].fillna(0.0)
+    r1_var = (r1_clean ** 2).ewm(span=45, adjust=False).mean().clip(lower=1e-7)
+    r5_var = (r5_clean ** 2).ewm(span=45, adjust=False).mean().clip(lower=1e-7)
+    lag1_corr = ((r1_clean * r1_clean.shift(1).fillna(0.0)).ewm(span=45, adjust=False).mean() / r1_var).clip(-0.65, 0.65)
+    lag5_corr = ((r5_clean * r5_clean.shift(5).fillna(0.0)).ewm(span=45, adjust=False).mean() / r5_var).clip(-0.65, 0.65)
+    serial_regime = (0.55 * lag1_corr + 0.45 * lag5_corr).clip(-0.60, 0.60)
+    df["serial_regime"] = serial_regime
+
+    # Non-linear regime-switched + wave-exhaustion aware signal (100% causal: bars 0..t only):
+    # Detects early/mid-wave acceleration vs overextended RSI/Bollinger wave cresting!
+    z_ext_20 = (df["dist_sma20"].fillna(0.0) / (ewma_daily * np.sqrt(20.0)).clip(lower=0.01)).clip(-3.0, 3.0)
+    mom_z_5 = (df["ret_5d"].fillna(0.0) / (ewma_daily * np.sqrt(5.0)).clip(lower=0.008)).clip(-3.0, 3.0)
+    mom_accel = ((r1_clean - (r5_clean / 5.0)) / ewma_daily.clip(lower=0.004)).clip(-2.0, 2.0)
+    exhaustion_damp = np.exp(-0.28 * np.maximum(0.0, np.abs(z_ext_20) - 1.45) ** 2)
+    trend_wave = (0.52 * mom_z_5 + 0.48 * df["kalman_drift_z"]) * exhaustion_damp + 0.16 * mom_accel - 0.18 * np.where(np.abs(z_ext_20) > 1.85, np.sign(z_ext_20) * (np.abs(z_ext_20) - 1.85), 0.0)
+    df["regime_mom_interact"] = (
+        np.where(serial_regime >= -0.02, trend_wave, -0.68 * z_ext_20 - 0.35 * df["rsi_centered"])
+    ).clip(-2.5, 2.5)
 
     # Cross-asset benchmark alignment (strictly date-matched causal join)
     if spy_df is not None and not spy_df.empty:

@@ -10,6 +10,7 @@ from typing import Literal, Optional
 from . import MODEL_VERSION
 from .evaluation.backtest import HORIZON_SPECS
 from .forecasting.engine import generate_horizon_forecast_and_backtest
+from .forecasting.features import build_causal_feature_frame
 from .providers.cache import market_cache
 from .providers.router import market_router
 from .schemas import (
@@ -50,6 +51,7 @@ def compute_all_horizons_for_ticker(
         if cached:
             return cached[0], inst, daily_df, prov, (fundamentals, news)
 
+    feat_df = build_causal_feature_frame(daily_df, spy_df=msx_df, sector_df=sec_df)
     horizon_map: dict[HorizonCode, tuple[HorizonForecast, HorizonBacktestReport]] = {}
     for h_code in ALL_HORIZONS:
         fc, bt = generate_horizon_forecast_and_backtest(
@@ -63,6 +65,7 @@ def compute_all_horizons_for_ticker(
             news=news,
             provenance=prov,
             horizon_code=h_code,
+            precomputed_feat_df=feat_df,
         )
         horizon_map[h_code] = (fc, bt)
 

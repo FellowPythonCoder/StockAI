@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ArrowDownRight,
   ArrowRight,
@@ -6,6 +6,8 @@ import {
   BarChart3,
   CheckCircle2,
   Dices,
+  HelpCircle,
+  Loader2,
   Play,
   ShieldAlert,
   StepForward,
@@ -21,12 +23,14 @@ import {
   TimeframeCode,
 } from '../types';
 import { ChartSimulationOverlay, FinancialChart } from '../components/FinancialChart';
-import { SimulationProgressState } from '../components/CandleSimulatorPanel';
+import { formatAiMoveToken, SimulationProgressState } from '../components/CandleSimulatorPanel';
 
 interface OverviewHomeProps {
   previewTicker: string;
   recentTickers: string[];
   onChangePreviewTicker: (sym: string) => void;
+  previewHorizon: HorizonCode;
+  onChangePreviewHorizon: (h: HorizonCode) => void;
   previewAnalysis: StockAnalysisResponse | null;
   previewChart: ChartSeriesResponse | null;
   previewTimeframe: TimeframeCode;
@@ -47,6 +51,8 @@ export const OverviewHome: React.FC<OverviewHomeProps> = ({
   previewTicker,
   recentTickers,
   onChangePreviewTicker,
+  previewHorizon,
+  onChangePreviewHorizon,
   previewAnalysis,
   previewChart,
   previewTimeframe,
@@ -62,12 +68,26 @@ export const OverviewHome: React.FC<OverviewHomeProps> = ({
   onExploreDashboard,
   onOpenForecastsAudit,
 }) => {
+  const [showPreviewWhy, setShowPreviewWhy] = useState<boolean>(false);
+  const [showPreviewVerdictCard, setShowPreviewVerdictCard] = useState<boolean>(true);
   const fc = previewAnalysis?.forecast;
   const bt = previewAnalysis?.backtest;
   const fund = previewAnalysis?.fundamentals;
   const isPriceUp = (previewAnalysis?.change_pct ?? 0) >= 0;
-  const isForecastUp = (fc?.expected_return_pct ?? 0) >= 0;
+  const displayedAiPct =
+    previewProgress?.isAnimating && previewProgress.lockedReturnPct != null
+      ? previewProgress.lockedReturnPct
+      : fc?.expected_return_pct ?? 0;
+  const isForecastUp = displayedAiPct >= 0;
   const busy = Boolean(previewProgress?.isAnimating) || generatingStock;
+  const livePreviewPct =
+    previewProgress?.isAnimating && previewProgress.startPrice > 0
+      ? ((previewProgress.livePrice / previewProgress.startPrice - 1) * 100)
+      : 0;
+  const activeVerdict =
+    previewVerdict && previewAnalysis && previewVerdict.ticker === previewAnalysis.instrument.ticker
+      ? previewVerdict
+      : null;
 
   const totalChecks = verdictHistory.length;
   const rightCount = verdictHistory.filter((v) => v.ai_got_it_right).length;
@@ -201,7 +221,7 @@ export const OverviewHome: React.FC<OverviewHomeProps> = ({
                     </div>
                   </div>
 
-                  {/* Quick Run Candles & Check AI Controls right inside Hero Preview! */}
+                  {/* Quick Run + [AI Thinks: 0.61+] + [Correct / Not Correct] Buttons right inside Hero Preview! */}
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
@@ -210,51 +230,191 @@ export const OverviewHome: React.FC<OverviewHomeProps> = ({
                       className="inline-flex items-center gap-1.5 rounded-md bg-[#111111] px-3.5 py-2 text-xs font-semibold text-white hover:bg-ink-700 disabled:opacity-50 transition-colors"
                     >
                       <Play className="h-3.5 w-3.5 fill-current" />
-                      <span>Run 5 Candles &amp; Check AI</span>
+                      <span>
+                        Run {fc.horizon_trading_days}{' '}
+                        {fc.horizon_trading_days === 1 ? 'Candle' : 'Candles'}
+                      </span>
                     </button>
+
+                    {/* What AI Thinks Button right next to Run (e.g. "AI Thinks: 0.61+") */}
+                    <button
+                      type="button"
+                      onClick={() => setShowPreviewWhy((v) => !v)}
+                      title="Click to inspect Super-Smart AI signals and switch horizon"
+                      className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-mono font-semibold tabular-nums transition-colors ${
+                        isForecastUp
+                          ? 'border-up-border bg-up-soft text-up hover:border-up'
+                          : 'border-down-border bg-down-soft text-down hover:border-down'
+                      }`}
+                    >
+                      {isForecastUp ? (
+                        <ArrowUpRight className="h-3.5 w-3.5" />
+                      ) : (
+                        <ArrowDownRight className="h-3.5 w-3.5" />
+                      )}
+                      <span>
+                        {previewProgress?.isAnimating ? 'AI Locked:' : 'AI Thinks:'}{' '}
+                        <strong>{formatAiMoveToken(displayedAiPct)}</strong>
+                      </span>
+                    </button>
+
+                    {/* After-Run Correctness Button right next to AI Thinks */}
+                    {previewProgress?.isAnimating ? (
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex items-center gap-1.5 rounded-md border border-ink-300 bg-ink-50 px-3 py-2 text-xs font-mono font-semibold text-[#111111] tabular-nums"
+                      >
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-[#111111]" />
+                        <span>
+                          Checking...{' '}
+                          <span className={livePreviewPct >= 0 ? 'text-up' : 'text-down'}>
+                            {formatAiMoveToken(livePreviewPct)}
+                          </span>
+                        </span>
+                      </button>
+                    ) : activeVerdict ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowPreviewVerdictCard((v) => !v)}
+                        title="Click to toggle detailed AI verification summary"
+                        className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-mono font-bold tabular-nums transition-colors ${
+                          activeVerdict.ai_got_it_right
+                            ? 'border-up-border bg-up-soft text-up hover:border-up'
+                            : 'border-down-border bg-down-soft text-down hover:border-down'
+                        }`}
+                      >
+                        {activeVerdict.ai_got_it_right ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <XCircle className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        <span>{activeVerdict.ai_got_it_right ? '✓ Correct!' : '✗ Not Correct'}</span>
+                        <span className="font-normal text-[11px] text-[#111111]">
+                          ({formatAiMoveToken(activeVerdict.predicted_return_pct)} →{' '}
+                          {formatAiMoveToken(activeVerdict.actual_return_pct)})
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onRunPreviewCandles()}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-ink-300 bg-ink-50/70 px-2.5 py-2 text-xs font-mono text-ink-500 hover:border-[#111111] hover:text-[#111111] disabled:opacity-50 transition-colors"
+                      >
+                        <HelpCircle className="h-3.5 w-3.5" />
+                        <span>Was Correct?</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       disabled={busy}
                       onClick={() => onRunPreviewCandles(1)}
-                      className="inline-flex items-center gap-1 rounded-md border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-[#111111] hover:border-[#111111] disabled:opacity-50 transition-colors"
+                      className="inline-flex items-center gap-1 rounded-md border border-ink-200 bg-white px-2.5 py-2 text-xs font-medium text-[#111111] hover:border-[#111111] disabled:opacity-50 transition-colors"
                     >
                       <StepForward className="h-3.5 w-3.5" />
-                      <span>+1 Candle</span>
+                      <span>+1</span>
                     </button>
                   </div>
                 </div>
+
+                {/* Multi-Horizon "AI Thinks" Buttons Strip right inside Hero Preview */}
+                {previewAnalysis.all_horizons_summary.length > 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-ink-200 bg-ink-50/60 px-3 py-1.5 text-[11px] font-mono">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-ink-500 uppercase tracking-wider mr-1">AI Horizons:</span>
+                      {previewAnalysis.all_horizons_summary.map((row) => {
+                        const active = previewHorizon === row.horizon_code;
+                        const rowUp = row.expected_return_pct >= 0;
+                        return (
+                          <button
+                            key={row.horizon_code}
+                            type="button"
+                            disabled={busy}
+                            onClick={() => onChangePreviewHorizon(row.horizon_code)}
+                            className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 transition-colors ${
+                              active
+                                ? 'border-[#111111] bg-[#111111] text-white font-semibold'
+                                : 'border-ink-200 bg-white text-[#111111] hover:border-[#111111]'
+                            }`}
+                          >
+                            <span className={active ? 'text-ink-300' : 'text-ink-500'}>
+                              {row.horizon_code.toUpperCase()}
+                            </span>
+                            <span
+                              className={
+                                active
+                                  ? rowUp
+                                    ? 'text-emerald-300'
+                                    : 'text-rose-300'
+                                  : rowUp
+                                  ? 'text-up font-semibold'
+                                  : 'text-down font-semibold'
+                              }
+                            >
+                              {formatAiMoveToken(row.expected_return_pct)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span className="text-ink-500">{fc.selected_model_name}</span>
+                  </div>
+                )}
+
+                {showPreviewWhy && (
+                  <div className="rounded-md border border-ink-200 bg-ink-50/50 p-3 text-xs grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {fc.factor_contributions.slice(0, 3).map((item) => (
+                      <div key={item.name} className="rounded border border-ink-200 bg-white px-2.5 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-[#111111] truncate">{item.name}</span>
+                          <span className="font-mono text-[11px] font-semibold text-[#111111]">
+                            {item.measured_value}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 text-[10px] text-ink-500 truncate">{item.description}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Live Progress or Verdict Callout right above Preview Chart */}
                 {previewProgress?.isAnimating ? (
                   <div className="rounded-md border border-ink-300 bg-ink-50 px-3.5 py-2 text-xs font-mono flex items-center justify-between">
                     <span>
-                      Simulating Random Candle {previewProgress.currentStep} / {previewProgress.totalSteps}...
+                      Simulating Random Candle {previewProgress.currentStep} / {previewProgress.totalSteps} · Testing AI{' '}
+                      <strong>{formatAiMoveToken(displayedAiPct)}</strong>
                     </span>
                     <span>
-                      Live: <strong>${previewProgress.livePrice.toFixed(2)}</strong>
+                      Live: <strong>${previewProgress.livePrice.toFixed(2)}</strong> (
+                      <span className={livePreviewPct >= 0 ? 'text-up' : 'text-down'}>
+                        {formatAiMoveToken(livePreviewPct)}
+                      </span>
+                      )
                     </span>
                   </div>
                 ) : (
-                  previewVerdict &&
-                  previewVerdict.ticker === previewAnalysis.instrument.ticker && (
+                  activeVerdict &&
+                  showPreviewVerdictCard && (
                     <div
                       className={`rounded-md border px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 ${
-                        previewVerdict.ai_got_it_right
+                        activeVerdict.ai_got_it_right
                           ? 'border-up-border bg-up-soft text-[#111111]'
                           : 'border-down-border bg-down-soft text-[#111111]'
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        {previewVerdict.ai_got_it_right ? (
+                        {activeVerdict.ai_got_it_right ? (
                           <CheckCircle2 className="h-4 w-4 text-up shrink-0" />
                         ) : (
                           <XCircle className="h-4 w-4 text-down shrink-0" />
                         )}
                         <span>
-                          <strong className={previewVerdict.ai_got_it_right ? 'text-up font-mono' : 'text-down font-mono'}>
-                            {previewVerdict.ai_got_it_right ? '✓ AI GOT IT RIGHT: ' : '✗ AI GOT IT WRONG: '}
+                          <strong className={activeVerdict.ai_got_it_right ? 'text-up font-mono' : 'text-down font-mono'}>
+                            {activeVerdict.ai_got_it_right ? '✓ AI WAS CORRECT: ' : '✗ AI WAS NOT CORRECT: '}
                           </strong>
-                          {previewVerdict.verdict_summary}
+                          {activeVerdict.verdict_summary}
                         </span>
                       </div>
                     </div>
