@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/build/
+.npm/
+
+# Environment & runtime SQLite databases
+.env
+backend/.env
+backend/data/*.db
+backend/data/*.db-journal
+backend/data/*.db-wal
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+Unselected files/
