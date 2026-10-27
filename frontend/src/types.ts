@@ -3,6 +3,7 @@ export type ForecastDirection = 'upside' | 'downside' | 'mixed';
 export type HorizonCode = '1d' | '5d' | '21d' | '63d' | '126d';
 export type TimeframeCode = '1D' | '1W' | '1M' | '3M' | '1Y' | '5Y';
 export type DataQualityLevel = 'High' | 'Medium' | 'Limited';
+export type RegimeArchetype = 'random' | 'momentum_up' | 'mean_reverting' | 'high_vol' | 'turnaround' | 'downtrend';
 
 export interface DataProvenance {
   mode: DataFeedMode;
@@ -224,6 +225,63 @@ export interface ChartSeriesResponse {
   fallback_notice?: string | null;
   provenance: DataProvenance;
   bars: CandleBar[];
+}
+
+export interface GenerateStockResponse {
+  analysis: StockAnalysisResponse;
+  chart: ChartSeriesResponse;
+}
+
+export interface LockedForecastSnapshot {
+  ticker: string;
+  horizon_code: HorizonCode;
+  horizon_label: string;
+  steps_evaluated: number;
+  starting_price: number;
+  starting_date: string;
+  target_date: string;
+  predicted_direction: ForecastDirection;
+  direction_label: string;
+  expected_return_pct: number;
+  expected_price: number;
+  range_68_low: number;
+  range_68_high: number;
+  range_90_low: number;
+  range_90_high: number;
+  prob_higher?: number | null;
+  trajectory: ForecastTrajectoryPoint[];
+}
+
+export interface CandleCheckVerdict {
+  ticker: string;
+  company_name: string;
+  horizon_code: HorizonCode;
+  horizon_label: string;
+  steps_ran: number;
+  start_date: string;
+  end_date: string;
+  start_price: number;
+  end_price: number;
+  actual_change_dollar: number;
+  actual_return_pct: number;
+  predicted_direction: ForecastDirection;
+  predicted_return_pct: number;
+  predicted_price: number;
+  range_68_low: number;
+  range_68_high: number;
+  within_68_range: boolean;
+  ai_got_it_right: boolean;
+  verdict_badge: string;
+  verdict_summary: string;
+  checked_at: string;
+}
+
+export interface CandleAdvanceResponse {
+  locked_forecast: LockedForecastSnapshot;
+  generated_bars: CandleBar[];
+  verdict: CandleCheckVerdict;
+  updated_analysis: StockAnalysisResponse;
+  updated_chart: ChartSeriesResponse;
 }
 
 export interface WatchlistItem {

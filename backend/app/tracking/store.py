@@ -10,7 +10,7 @@ import pandas as pd
 
 from ..config import DB_PATH
 from ..evaluation.backtest import HORIZON_SPECS
-from ..providers.catalog import INSTRUMENTS
+from ..providers.synthetic_market import synthetic_market
 from ..schemas import HorizonCode, HorizonForecast, TrackedForecastRecord
 
 
@@ -63,12 +63,12 @@ class TrackingStore:
             if cur.fetchone()["cnt"] == 0:
                 now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 defaults = [
-                    ("NVDA", 0, "5d", now_iso),
-                    ("AAPL", 1, "5d", now_iso),
-                    ("MSFT", 2, "5d", now_iso),
-                    ("GOOGL", 3, "21d", now_iso),
-                    ("AMZN", 4, "5d", now_iso),
-                    ("TSLA", 5, "5d", now_iso),
+                    ("VELX", 0, "5d", now_iso),
+                    ("KRNL", 1, "5d", now_iso),
+                    ("AETH", 2, "5d", now_iso),
+                    ("NEXO", 3, "21d", now_iso),
+                    ("SLST", 4, "5d", now_iso),
+                    ("CYPH", 5, "5d", now_iso),
                 ]
                 conn.executemany(
                     "INSERT INTO watchlist(ticker, position, preferred_horizon, added_at) VALUES (?, ?, ?, ?)",
@@ -76,7 +76,6 @@ class TrackingStore:
                 )
             conn.commit()
 
-    # --- Watchlist Operations ---
     def list_watchlist_entries(self) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -117,7 +116,6 @@ class TrackingStore:
                 conn.execute("UPDATE watchlist SET position = ? WHERE ticker = ?", (idx, sym))
             conn.commit()
 
-    # --- Forecast Ledger Operations ---
     def record_live_forecast(self, forecast: HorizonForecast) -> int:
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self._connect() as conn:
@@ -167,7 +165,6 @@ class TrackingStore:
         model_version: str,
         audit_points: list[dict],
     ) -> None:
-        """Persists recent chronological walk-forward predictions alongside realized prices for auditability."""
         _, h = HORIZON_SPECS[horizon_code]
         with self._connect() as conn:
             for pt in audit_points[-8:]:
@@ -210,7 +207,6 @@ class TrackingStore:
             conn.commit()
 
     def resolve_pending_outcomes(self, ticker: str, daily_df: pd.DataFrame) -> int:
-        """Resolves pending forecasts once market candles reach or pass `target_date`."""
         if daily_df.empty:
             return 0
         sym = ticker.upper().strip()
@@ -277,7 +273,11 @@ class TrackingStore:
             for r in rows:
                 h_code: HorizonCode = r["horizon_code"]
                 h_label = HORIZON_SPECS.get(h_code, (h_code, int(r["horizon_days"])))[0]
-                comp_name = INSTRUMENTS.get(r["ticker"], {}).get("name", r["ticker"])
+                comp_name = (
+                    synthetic_market.get_meta(r["ticker"])["name"]
+                    if synthetic_market.has_instrument(r["ticker"])
+                    else r["ticker"]
+                )
                 real_p = r["realized_price"]
                 real_ret = r["realized_return_pct"]
                 exp_ret = float(r["expected_return_pct"])

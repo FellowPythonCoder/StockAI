@@ -1,22 +1,22 @@
+import { clientSyntheticEngine } from '../engine/syntheticClientEngine';
 import {
+  CandleAdvanceResponse,
   ChartSeriesResponse,
+  GenerateStockResponse,
   HorizonCode,
   InstrumentSummary,
   MarketOverviewResponse,
+  RegimeArchetype,
   StockAnalysisResponse,
   TimeframeCode,
   TrackedForecastRecord,
   WatchlistItem,
 } from '../types';
 
-const LS_WATCHLIST_KEY = 'market_signal_watchlist_v2';
-const LS_TRACKING_KEY = 'market_signal_tracking_v2';
+const LS_WATCHLIST_KEY = 'market_signal_synth_watchlist_v3';
+const LS_TRACKING_KEY = 'market_signal_synth_tracking_v3';
 
 let backendState: 'unknown' | 'live_api' | 'static_pages' = 'unknown';
-
-const staticAnalysisCache = new Map<string, Record<HorizonCode, StockAnalysisResponse>>();
-const staticChartsCache = new Map<string, Record<TimeframeCode, ChartSeriesResponse>>();
-let staticCatalogCache: InstrumentSummary[] | null = null;
 
 export async function detectRuntimeMode(): Promise<'live_api' | 'static_pages'> {
   if (backendState !== 'unknown') return backendState;
@@ -58,48 +58,115 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function loadStaticCatalog(): Promise<InstrumentSummary[]> {
-  if (staticCatalogCache) return staticCatalogCache;
-  staticCatalogCache = await fetchJson<InstrumentSummary[]>('./static-data/catalog.json');
-  return staticCatalogCache;
+function readLocalTracking(): TrackedForecastRecord[] {
+  try {
+    const raw = localStorage.getItem(LS_TRACKING_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return [];
 }
 
-async function loadStaticTickerAnalysisMap(ticker: string): Promise<Record<HorizonCode, StockAnalysisResponse>> {
-  const sym = ticker.toUpperCase().trim();
-  const hit = staticAnalysisCache.get(sym);
-  if (hit) return hit;
+function writeLocalTracking(list: TrackedForecastRecord[]): void {
   try {
-    const data = await fetchJson<Record<HorizonCode, StockAnalysisResponse>>(`./static-data/analysis/${sym}.json`);
-    staticAnalysisCache.set(sym, data);
-    return data;
+    localStorage.setItem(LS_TRACKING_KEY, JSON.stringify(list.slice(0, 120)));
   } catch {
-    throw new Error(
-      `Instrument '${sym}' is not in the precomputed GitHub Pages snapshot. Run the FastAPI server with a live provider API key to query arbitrary market symbols.`
-    );
+    // ignore storage errors
   }
+}
+
+function recordLocalAnalysisForecast(analysis: StockAnalysisResponse): void {
+  const list = readLocalTracking();
+  const fc = analysis.forecast;
+  const idx = list.findIndex(
+    (r) =>
+      r.ticker === fc.ticker &&
+      r.source_date === fc.starting_date &&
+      r.horizon_code === fc.horizon_code &&
+      r.record_origin === 'live_user'
+  );
+  const entry: TrackedForecastRecord = {
+    id: idx >= 0 ? list[idx].id : Date.now() + Math.floor(Math.random() * 1000),
+    created_at: new Date().toISOString(),
+    ticker: fc.ticker,
+    company_name: analysis.instrument.name,
+    source_price: fc.starting_price,
+    source_date: fc.starting_date,
+    horizon_code: fc.horizon_code,
+    horizon_label: fc.horizon_label,
+    horizon_days: fc.horizon_trading_days,
+    target_date: fc.target_date,
+    predicted_direction: fc.direction,
+    expected_return_pct: fc.expected_return_pct,
+    range_68_low: fc.range_68_low,
+    range_68_high: fc.range_68_high,
+    prob_higher: fc.prob_higher,
+    model_version: fc.model_version,
+    record_origin: 'live_user',
+    outcome_status: idx >= 0 ? list[idx].outcome_status : 'pending',
+    realized_price: idx >= 0 ? list[idx].realized_price : null,
+    realized_date: idx >= 0 ? list[idx].realized_date : null,
+    realized_return_pct: idx >= 0 ? list[idx].realized_return_pct : null,
+    directional_hit: idx >= 0 ? list[idx].directional_hit : null,
+    within_68_range: idx >= 0 ? list[idx].within_68_range : null,
+    abs_error_pct: idx >= 0 ? list[idx].abs_error_pct : null,
+  };
+  if (idx >= 0) list[idx] = entry;
+  else list.unshift(entry);
+  writeLocalTracking(list);
+}
+
+function recordLocalRealizedCheck(resp: CandleAdvanceResponse): void {
+  const list = readLocalTracking();
+  const v = resp.verdict;
+  const idx = list.findIndex(
+    (r) =>
+      r.ticker === v.ticker &&
+      r.source_date === v.start_date &&
+      r.horizon_code === v.horizon_code &&
+      r.record_origin === 'live_user'
+  );
+  const realizedRecord: TrackedForecastRecord = {
+    id: idx >= 0 ? list[idx].id : Date.now() + Math.floor(Math.random() * 1000),
+    created_at: v.checked_at,
+    ticker: v.ticker,
+    company_name: v.company_name,
+    source_price: v.start_price,
+    source_date: v.start_date,
+    horizon_code: v.horizon_code,
+    horizon_label: v.horizon_label,
+    horizon_days: v.steps_ran,
+    target_date: v.end_date,
+    predicted_direction: v.predicted_direction,
+    expected_return_pct: v.predicted_return_pct,
+    range_68_low: v.range_68_low,
+    range_68_high: v.range_68_high,
+    prob_higher: resp.locked_forecast.prob_higher,
+    model_version: resp.updated_analysis.forecast.model_version,
+    record_origin: 'live_user',
+    outcome_status: 'realized',
+    realized_price: v.end_price,
+    realized_date: v.end_date,
+    realized_return_pct: v.actual_return_pct,
+    directional_hit: v.ai_got_it_right,
+    within_68_range: v.within_68_range,
+    abs_error_pct: Math.round(Math.abs(v.actual_return_pct - v.predicted_return_pct) * 100) / 100,
+  };
+  if (idx >= 0) list[idx] = realizedRecord;
+  else list.unshift(realizedRecord);
+  writeLocalTracking(list);
 }
 
 export async function searchInstruments(query: string): Promise<InstrumentSummary[]> {
   const mode = await detectRuntimeMode();
   if (mode === 'live_api') {
-    return fetchJson<InstrumentSummary[]>(`./api/search?q=${encodeURIComponent(query)}&limit=20`);
+    return fetchJson<InstrumentSummary[]>(`./api/search?q=${encodeURIComponent(query)}&limit=24`);
   }
-  const catalog = await loadStaticCatalog();
-  const q = query.trim().toUpperCase();
-  if (!q) return catalog.slice(0, 20);
-  const scored = catalog
-    .map((item) => {
-      let score = 0;
-      if (item.ticker === q) score = 1000;
-      else if (item.ticker.startsWith(q)) score = 800;
-      else if (item.ticker.includes(q)) score = 600;
-      else if (item.name.toUpperCase().includes(q)) score = item.name.toUpperCase().startsWith(q) ? 500 : 350;
-      else if (item.sector.toUpperCase().includes(q) || item.industry.toUpperCase().includes(q)) score = 200;
-      return { score, item };
-    })
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score || a.item.ticker.localeCompare(b.item.ticker));
-  return scored.slice(0, 20).map((x) => x.item);
+  return clientSyntheticEngine.search(query);
 }
 
 export async function fetchMarketOverview(refresh = false): Promise<MarketOverviewResponse> {
@@ -107,58 +174,64 @@ export async function fetchMarketOverview(refresh = false): Promise<MarketOvervi
   if (mode === 'live_api') {
     return fetchJson<MarketOverviewResponse>(`./api/market-overview?refresh=${refresh}`);
   }
-  const ov = await fetchJson<MarketOverviewResponse>('./static-data/market-overview.json');
-  return {
-    ...ov,
-    provenance: {
-      ...ov.provenance,
-      provider_name: 'Static Snapshot · GitHub Pages Mode',
-      note: 'Running serverless on GitHub Pages using verified precomputed quantitative market snapshots.',
-    },
-  };
+  return clientSyntheticEngine.getMarketOverview();
 }
 
-function recordStaticTrackingEntry(analysis: StockAnalysisResponse): void {
-  try {
-    const raw = localStorage.getItem(LS_TRACKING_KEY);
-    const list: TrackedForecastRecord[] = raw ? JSON.parse(raw) : [];
-    const fc = analysis.forecast;
-    const existingIdx = list.findIndex(
-      (r) =>
-        r.ticker === fc.ticker &&
-        r.source_date === fc.starting_date &&
-        r.horizon_code === fc.horizon_code &&
-        r.record_origin === 'live_user'
-    );
-    const entry: TrackedForecastRecord = {
-      id: existingIdx >= 0 ? list[existingIdx].id : Date.now(),
-      created_at: new Date().toISOString(),
-      ticker: fc.ticker,
-      company_name: analysis.instrument.name,
-      source_price: fc.starting_price,
-      source_date: fc.starting_date,
-      horizon_code: fc.horizon_code,
-      horizon_label: fc.horizon_label,
-      horizon_days: fc.horizon_trading_days,
-      target_date: fc.target_date,
-      predicted_direction: fc.direction,
-      expected_return_pct: fc.expected_return_pct,
-      range_68_low: fc.range_68_low,
-      range_68_high: fc.range_68_high,
-      prob_higher: fc.prob_higher,
-      model_version: fc.model_version,
-      record_origin: 'live_user',
-      outcome_status: 'pending',
-    };
-    if (existingIdx >= 0) {
-      list[existingIdx] = entry;
-    } else {
-      list.unshift(entry);
-    }
-    localStorage.setItem(LS_TRACKING_KEY, JSON.stringify(list.slice(0, 60)));
-  } catch {
-    // ignore storage quota errors
+export async function generateRandomStock(options?: {
+  regime?: RegimeArchetype;
+  sector?: string;
+  custom_ticker?: string;
+  custom_name?: string;
+  horizon?: HorizonCode;
+  timeframe?: TimeframeCode;
+}): Promise<GenerateStockResponse> {
+  const payload = {
+    regime: options?.regime || 'random',
+    sector: options?.sector,
+    custom_ticker: options?.custom_ticker,
+    custom_name: options?.custom_name,
+    horizon: options?.horizon || '5d',
+    timeframe: options?.timeframe || '3M',
+  };
+  const mode = await detectRuntimeMode();
+  if (mode === 'live_api') {
+    return fetchJson<GenerateStockResponse>('./api/stocks/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
   }
+  const generated = clientSyntheticEngine.generateRandomStock(
+    payload.regime,
+    payload.sector,
+    payload.custom_ticker,
+    payload.custom_name,
+    payload.horizon,
+    payload.timeframe
+  );
+  recordLocalAnalysisForecast(generated.analysis);
+  return generated;
+}
+
+export async function advanceStockCandles(
+  ticker: string,
+  horizon: HorizonCode = '5d',
+  steps?: number,
+  timeframe: TimeframeCode = '3M'
+): Promise<CandleAdvanceResponse> {
+  const sym = ticker.toUpperCase().trim();
+  const mode = await detectRuntimeMode();
+  if (mode === 'live_api') {
+    return fetchJson<CandleAdvanceResponse>(`./api/stocks/${encodeURIComponent(sym)}/advance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ horizon, steps, timeframe }),
+    });
+  }
+  const resp = clientSyntheticEngine.advanceAndVerify(sym, horizon, steps, timeframe);
+  recordLocalRealizedCheck(resp);
+  recordLocalAnalysisForecast(resp.updated_analysis);
+  return resp;
 }
 
 export async function fetchStockAnalysis(
@@ -173,31 +246,14 @@ export async function fetchStockAnalysis(
       `./api/stocks/${encodeURIComponent(sym)}/analysis?horizon=${horizon}&refresh=${refresh}`
     );
   }
-  if (refresh) {
-    staticAnalysisCache.delete(sym);
-  }
-  const byHorizon = await loadStaticTickerAnalysisMap(sym);
-  const picked = byHorizon[horizon] || byHorizon['5d'];
-  const stamped: StockAnalysisResponse = {
-    ...picked,
-    provenance: {
-      ...picked.provenance,
-      provider_name: 'Static Snapshot · GitHub Pages Mode',
-      fetched_at: new Date().toISOString(),
-      note: 'Running serverless on GitHub Pages — forecasts and walk-forward backtests precomputed from verified historical data.',
-    },
-    forecast: {
-      ...picked.forecast,
-      last_updated: new Date().toISOString(),
-    },
-  };
-  recordStaticTrackingEntry(stamped);
-  return stamped;
+  const an = clientSyntheticEngine.analyze(sym, horizon);
+  recordLocalAnalysisForecast(an);
+  return an;
 }
 
 export async function fetchStockChart(
   ticker: string,
-  timeframe: TimeframeCode = '1Y',
+  timeframe: TimeframeCode = '3M',
   refresh = false
 ): Promise<ChartSeriesResponse> {
   const sym = ticker.toUpperCase().trim();
@@ -207,43 +263,48 @@ export async function fetchStockChart(
       `./api/stocks/${encodeURIComponent(sym)}/chart?timeframe=${timeframe}&refresh=${refresh}`
     );
   }
-  if (refresh) {
-    staticChartsCache.delete(sym);
-  }
-  let map = staticChartsCache.get(sym);
-  if (!map) {
-    map = await fetchJson<Record<TimeframeCode, ChartSeriesResponse>>(`./static-data/charts/${sym}.json`);
-    staticChartsCache.set(sym, map);
-  }
-  const series = map[timeframe] || map['1Y'];
-  return {
-    ...series,
-    provenance: {
-      ...series.provenance,
-      provider_name: 'Static Snapshot · GitHub Pages Mode',
-    },
-  };
+  return clientSyntheticEngine.getChart(sym, timeframe);
 }
 
-// --- Watchlist API (Server SQLite + Static localStorage Fallback) ---
+// --- Watchlist Persistence ---
 interface StoredWatchSpec {
   ticker: string;
   preferred_horizon: HorizonCode;
 }
 
-async function buildStaticWatchlist(specs: StoredWatchSpec[]): Promise<WatchlistItem[]> {
+function getLocalWatchSpecs(): StoredWatchSpec[] {
+  try {
+    const raw = localStorage.getItem(LS_WATCHLIST_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as StoredWatchSpec[];
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  const defaults: StoredWatchSpec[] = [
+    { ticker: 'VELX', preferred_horizon: '5d' },
+    { ticker: 'KRNL', preferred_horizon: '5d' },
+    { ticker: 'AETH', preferred_horizon: '5d' },
+    { ticker: 'NEXO', preferred_horizon: '21d' },
+    { ticker: 'SLST', preferred_horizon: '5d' },
+    { ticker: 'CYPH', preferred_horizon: '5d' },
+  ];
+  try {
+    localStorage.setItem(LS_WATCHLIST_KEY, JSON.stringify(defaults));
+  } catch {
+    // ignore
+  }
+  return defaults;
+}
+
+function buildLocalWatchlist(specs: StoredWatchSpec[]): WatchlistItem[] {
   const out: WatchlistItem[] = [];
   for (let i = 0; i < specs.length; i++) {
     const { ticker, preferred_horizon } = specs[i];
     try {
-      const map = await loadStaticTickerAnalysisMap(ticker);
-      const an = map[preferred_horizon] || map['5d'];
-      let chMap = staticChartsCache.get(ticker);
-      if (!chMap) {
-        chMap = await fetchJson<Record<TimeframeCode, ChartSeriesResponse>>(`./static-data/charts/${ticker}.json`);
-        staticChartsCache.set(ticker, chMap);
-      }
-      const bars1m = chMap['1M']?.bars || [];
+      const an = clientSyntheticEngine.analyze(ticker, preferred_horizon);
+      const ch = clientSyntheticEngine.getChart(ticker, '1M');
       out.push({
         ticker: an.instrument.ticker,
         name: an.instrument.name,
@@ -260,29 +321,13 @@ async function buildStaticWatchlist(specs: StoredWatchSpec[]): Promise<Watchlist
         range_high: an.forecast.range_68_high,
         prob_higher: an.forecast.prob_higher,
         last_analyzed_at: an.forecast.last_updated,
-        sparkline: bars1m.slice(-25).map((b) => b.close),
+        sparkline: ch.bars.slice(-25).map((b) => b.close),
       });
     } catch {
-      // skip invalid symbol
+      // skip invalid
     }
   }
   return out;
-}
-
-async function getStoredStaticSpecs(): Promise<StoredWatchSpec[]> {
-  try {
-    const raw = localStorage.getItem(LS_WATCHLIST_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as StoredWatchSpec[];
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {
-    // fallback to seed
-  }
-  const seed = await fetchJson<WatchlistItem[]>('./static-data/watchlist-seed.json');
-  const specs = seed.map((w) => ({ ticker: w.ticker, preferred_horizon: w.preferred_horizon }));
-  localStorage.setItem(LS_WATCHLIST_KEY, JSON.stringify(specs));
-  return specs;
 }
 
 export async function fetchWatchlist(refresh = false): Promise<WatchlistItem[]> {
@@ -290,8 +335,7 @@ export async function fetchWatchlist(refresh = false): Promise<WatchlistItem[]> 
   if (mode === 'live_api') {
     return fetchJson<WatchlistItem[]>(`./api/watchlist?refresh=${refresh}`);
   }
-  const specs = await getStoredStaticSpecs();
-  return buildStaticWatchlist(specs);
+  return buildLocalWatchlist(getLocalWatchSpecs());
 }
 
 export async function addWatchlistTicker(ticker: string, preferred_horizon: HorizonCode = '5d'): Promise<WatchlistItem[]> {
@@ -304,16 +348,13 @@ export async function addWatchlistTicker(ticker: string, preferred_horizon: Hori
       body: JSON.stringify({ ticker: sym, preferred_horizon }),
     });
   }
-  await loadStaticTickerAnalysisMap(sym); // validates ticker exists
-  const specs = await getStoredStaticSpecs();
+  clientSyntheticEngine.analyze(sym, preferred_horizon);
+  const specs = getLocalWatchSpecs();
   const idx = specs.findIndex((s) => s.ticker === sym);
-  if (idx >= 0) {
-    specs[idx].preferred_horizon = preferred_horizon;
-  } else {
-    specs.push({ ticker: sym, preferred_horizon });
-  }
+  if (idx >= 0) specs[idx].preferred_horizon = preferred_horizon;
+  else specs.push({ ticker: sym, preferred_horizon });
   localStorage.setItem(LS_WATCHLIST_KEY, JSON.stringify(specs));
-  return buildStaticWatchlist(specs);
+  return buildLocalWatchlist(specs);
 }
 
 export async function removeWatchlistTicker(ticker: string): Promise<WatchlistItem[]> {
@@ -322,9 +363,9 @@ export async function removeWatchlistTicker(ticker: string): Promise<WatchlistIt
   if (mode === 'live_api') {
     return fetchJson<WatchlistItem[]>(`./api/watchlist/${encodeURIComponent(sym)}`, { method: 'DELETE' });
   }
-  const specs = (await getStoredStaticSpecs()).filter((s) => s.ticker !== sym);
+  const specs = getLocalWatchSpecs().filter((s) => s.ticker !== sym);
   localStorage.setItem(LS_WATCHLIST_KEY, JSON.stringify(specs));
-  return buildStaticWatchlist(specs);
+  return buildLocalWatchlist(specs);
 }
 
 export async function reorderWatchlistTickers(tickers: string[]): Promise<WatchlistItem[]> {
@@ -336,7 +377,7 @@ export async function reorderWatchlistTickers(tickers: string[]): Promise<Watchl
       body: JSON.stringify({ tickers }),
     });
   }
-  const current = await getStoredStaticSpecs();
+  const current = getLocalWatchSpecs();
   const bySym = new Map(current.map((c) => [c.ticker, c]));
   const next: StoredWatchSpec[] = [];
   for (const t of tickers) {
@@ -344,7 +385,7 @@ export async function reorderWatchlistTickers(tickers: string[]): Promise<Watchl
     if (found) next.push(found);
   }
   localStorage.setItem(LS_WATCHLIST_KEY, JSON.stringify(next));
-  return buildStaticWatchlist(next);
+  return buildLocalWatchlist(next);
 }
 
 export async function fetchTrackedForecasts(ticker?: string): Promise<TrackedForecastRecord[]> {
@@ -353,26 +394,56 @@ export async function fetchTrackedForecasts(ticker?: string): Promise<TrackedFor
     const q = ticker ? `?ticker=${encodeURIComponent(ticker)}&limit=100` : '?limit=100';
     return fetchJson<TrackedForecastRecord[]>(`./api/tracking${q}`);
   }
-  const seed = await fetchJson<TrackedForecastRecord[]>('./static-data/tracking-seed.json');
-  let local: TrackedForecastRecord[] = [];
-  try {
-    const raw = localStorage.getItem(LS_TRACKING_KEY);
-    if (raw) local = JSON.parse(raw);
-  } catch {
-    local = [];
+  const local = readLocalTracking();
+  // Also include recent walk-forward backtest audit points for the active or default stocks
+  const seedSyms = ticker ? [ticker.toUpperCase().trim()] : ['VELX', 'KRNL', 'AETH'];
+  const auditRows: TrackedForecastRecord[] = [];
+  let seq = 10000;
+  for (const sym of seedSyms) {
+    try {
+      const an = clientSyntheticEngine.analyze(sym, '5d');
+      for (const pt of an.backtest.recent_walk_forward_points.slice(-6).reverse()) {
+        const hit =
+          (pt.predicted_return_pct >= 0 && pt.realized_return_pct >= 0) ||
+          (pt.predicted_return_pct < 0 && pt.realized_return_pct < 0);
+        const lo = Math.round(pt.source_price * (1 + pt.range_68_low_pct / 100) * 100) / 100;
+        const hi = Math.round(pt.source_price * (1 + pt.range_68_high_pct / 100) * 100) / 100;
+        auditRows.push({
+          id: seq++,
+          created_at: `${pt.origin_date}T20:00:00Z`,
+          ticker: sym,
+          company_name: an.instrument.name,
+          source_price: pt.source_price,
+          source_date: pt.origin_date,
+          horizon_code: '5d',
+          horizon_label: '5 trading days',
+          horizon_days: 5,
+          target_date: pt.target_date,
+          predicted_direction: pt.predicted_return_pct >= 0.2 ? 'upside' : pt.predicted_return_pct <= -0.2 ? 'downside' : 'mixed',
+          expected_return_pct: pt.predicted_return_pct,
+          range_68_low: lo,
+          range_68_high: hi,
+          prob_higher: null,
+          model_version: an.forecast.model_version,
+          record_origin: 'walk_forward_audit',
+          outcome_status: 'realized',
+          realized_price: pt.realized_price,
+          realized_date: pt.target_date,
+          realized_return_pct: pt.realized_return_pct,
+          directional_hit: hit,
+          within_68_range: pt.realized_price >= lo && pt.realized_price <= hi,
+          abs_error_pct: Math.round(Math.abs(pt.realized_return_pct - pt.predicted_return_pct) * 100) / 100,
+        });
+      }
+    } catch {
+      // ignore
+    }
   }
-  // Merge local user runs ahead of seed walk-forward audit records without duplicating
-  const seen = new Set<string>();
-  const combined: TrackedForecastRecord[] = [];
-  for (const rec of [...local, ...seed]) {
-    const key = `${rec.ticker}:${rec.source_date}:${rec.horizon_code}:${rec.record_origin}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    combined.push(rec);
-  }
+
+  const combined = [...local, ...auditRows];
   if (ticker) {
-    const sym = ticker.toUpperCase().trim();
-    return combined.filter((r) => r.ticker === sym);
+    const clean = ticker.toUpperCase().trim();
+    return combined.filter((r) => r.ticker === clean);
   }
   return combined;
 }
@@ -392,29 +463,14 @@ export async function fetchProviderStatus(): Promise<{
     return fetchJson('./api/provider-status');
   }
   return {
-    active_mode: 'archival_demo',
-    provider_name: 'Static Snapshot · GitHub Pages Mode',
-    source_attribution: 'Yahoo Finance Verified Historical Snapshot (Precomputed)',
-    as_of_timestamp: '2026-10-26',
-    market_status: 'Static GitHub Pages Deployment',
-    is_demo_or_archive: true,
-    configured_providers: [],
+    active_mode: 'live',
+    provider_name: 'Browser Procedural Candle Engine (GitHub Pages Ready)',
+    source_attribution: 'Client-Side Stochastic GARCH(1,1) + Multi-Regime Stock Generator',
+    as_of_timestamp: 'Live Interactive Session',
+    market_status: 'Procedural Candle Simulator Active',
+    is_demo_or_archive: false,
+    configured_providers: ['client-procedural-garch-engine'],
     setup_instructions:
-      'Currently running as a 100% static GitHub Pages build. To connect live Finnhub, Alpha Vantage, or Twelve Data API keys securely on the server, run the FastAPI backend locally or in cloud hosting with backend/.env configured.',
+      'Running 100% client-side in your browser — generate unlimited synthetic stocks and advance future candlesticks randomly to check whether the AI forecast got it right, with zero external API keys needed.',
   };
-}
-
-export async function configureServerProviderKey(
-  provider: 'finnhub' | 'alphavantage' | 'twelvedata',
-  apiKey: string
-): Promise<{ updated: boolean; configured_providers: string[] }> {
-  const mode = await detectRuntimeMode();
-  if (mode !== 'live_api') {
-    throw new Error('Server-side API key storage requires running the FastAPI backend (not static GitHub Pages mode).');
-  }
-  return fetchJson('./api/provider-config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, api_key: apiKey }),
-  });
 }

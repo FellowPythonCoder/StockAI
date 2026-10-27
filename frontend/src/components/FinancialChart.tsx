@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CandleBar, ForecastTrajectoryPoint, HorizonForecast, TimeframeCode } from '../types';
+import { CandleBar, CandleCheckVerdict, ForecastTrajectoryPoint, HorizonForecast, TimeframeCode } from '../types';
+
+export interface ChartSimulationOverlay {
+  originTime: string;
+  startPrice: number;
+  predictedPrice: number;
+  range68Low: number;
+  range68High: number;
+  isAnimating: boolean;
+  verdict?: CandleCheckVerdict | null;
+}
 
 interface FinancialChartProps {
   ticker: string;
@@ -7,6 +17,7 @@ interface FinancialChartProps {
   timeframe: TimeframeCode;
   onChangeTimeframe: (tf: TimeframeCode) => void;
   forecast?: HorizonForecast | null;
+  simulationOverlay?: ChartSimulationOverlay | null;
   height?: number;
   compactControls?: boolean;
   fallbackNotice?: string | null;
@@ -24,16 +35,15 @@ function formatVolume(v: number): string {
 function formatAxisDate(raw: string, tf: TimeframeCode): string {
   if (!raw) return '';
   if (raw.length > 10 && (tf === '1D' || tf === '1W')) {
-    // "2026-10-26 16:30:00"
     const parts = raw.split(' ');
     const md = parts[0].slice(5);
     const hm = (parts[1] || '').slice(0, 5);
     return tf === '1D' ? hm : `${md} ${hm}`;
   }
   if (tf === '5Y' || tf === '1Y') {
-    return raw.slice(0, 7); // YYYY-MM
+    return raw.slice(0, 7);
   }
-  return raw.slice(5, 10); // MM-DD
+  return raw.slice(5, 10);
 }
 
 export const FinancialChart: React.FC<FinancialChartProps> = ({
@@ -42,13 +52,14 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
   timeframe,
   onChangeTimeframe,
   forecast,
+  simulationOverlay,
   height = 390,
   compactControls = false,
   fallbackNotice,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number>(820);
-  const [chartMode, setChartMode] = useState<'line' | 'candle'>('line');
+  const [chartMode, setChartMode] = useState<'line' | 'candle'>('candle');
   const [showVolume, setShowVolume] = useState<boolean>(true);
   const [showSma20, setShowSma20] = useState<boolean>(true);
   const [showSma50, setShowSma50] = useState<boolean>(true);
@@ -70,26 +81,36 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
     return () => ro.disconnect();
   }, []);
 
-  // Only show forecast cone on daily timeframes (or 1W/1M/3M/1Y/5Y) where scale matches well
+  // Hide future cone while animating simulated candles so visual focus stays on the unfolding check
   const conePoints: ForecastTrajectoryPoint[] = useMemo(() => {
+    if (simulationOverlay?.isAnimating) return [];
     if (!showForecastCone || !forecast || !forecast.trajectory || forecast.trajectory.length < 2) {
       return [];
     }
     if (timeframe === '1D' && forecast.horizon_trading_days > 5) {
       return [];
     }
-    return forecast.trajectory.slice(1); // index 0 is spot anchor
-  }, [showForecastCone, forecast, timeframe]);
+    return forecast.trajectory.slice(1);
+  }, [showForecastCone, forecast, timeframe, simulationOverlay?.isAnimating]);
 
   const totalSlots = bars.length + conePoints.length;
   const padLeft = 12;
   const padRight = 64;
-  const padTop = 18;
+  const padTop = 22;
   const padBottom = 26;
   const rsiHeight = showRsi && !compactControls ? 78 : 0;
   const rsiGap = rsiHeight > 0 ? 18 : 0;
   const mainPlotH = Math.max(180, height - padTop - padBottom - rsiHeight - rsiGap);
   const plotW = Math.max(120, width - padLeft - padRight);
+
+  const simOriginIdx = useMemo(() => {
+    if (!simulationOverlay || bars.length === 0) return -1;
+    const targetPrefix = simulationOverlay.originTime.slice(0, 10);
+    for (let i = bars.length - 1; i >= 0; i--) {
+      if (bars[i].time.slice(0, 10) === targetPrefix) return i;
+    }
+    return -1;
+  }, [bars, simulationOverlay]);
 
   const { yMin, yMax, maxVol, periodPositive } = useMemo(() => {
     if (bars.length === 0) {
@@ -127,16 +148,21 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
       maxP = Math.max(maxP, pt.range_90_high);
     }
 
+    if (simulationOverlay && simOriginIdx >= 0) {
+      minP = Math.min(minP, simulationOverlay.range68Low, simulationOverlay.predictedPrice);
+      maxP = Math.max(maxP, simulationOverlay.range68High, simulationOverlay.predictedPrice);
+    }
+
     const span = Math.max(maxP - minP, maxP * 0.015, 0.5);
     const bottomPadFactor = showVolume ? 0.18 : 0.08;
     const pos = bars[bars.length - 1].close >= bars[0].close;
     return {
       yMin: minP - span * bottomPadFactor,
-      yMax: maxP + span * 0.08,
+      yMax: maxP + span * 0.1,
       maxVol: mv,
       periodPositive: pos,
     };
-  }, [bars, conePoints, chartMode, showSma20, showSma50, showSma200, showVolume]);
+  }, [bars, conePoints, chartMode, showSma20, showSma50, showSma200, showVolume, simulationOverlay, simOriginIdx]);
 
   const xAt = (idx: number): number => {
     if (totalSlots <= 1) return padLeft + plotW / 2;
@@ -223,7 +249,6 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bars, rsiHeight, width, totalSlots, mainPlotH]);
 
-  // Forecast cone geometry
   const coneGeometry = useMemo(() => {
     if (conePoints.length === 0 || bars.length === 0) return null;
     const anchorIdx = bars.length - 1;
@@ -325,7 +350,7 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
       ? '#B91C1C'
       : '#52525B';
 
-  const candleWidth = Math.max(2, Math.min(11, (plotW / Math.max(bars.length, 20)) * 0.66));
+  const candleWidth = Math.max(2.5, Math.min(11, (plotW / Math.max(bars.length, 20)) * 0.68));
 
   return (
     <div ref={containerRef} className="w-full select-none">
@@ -355,21 +380,21 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
           <div className="inline-flex rounded border border-ink-200 p-0.5 bg-ink-50">
             <button
               type="button"
-              onClick={() => setChartMode('line')}
-              className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                chartMode === 'line' ? 'bg-white text-[#111111] shadow-sm' : 'text-ink-500 hover:text-[#111111]'
-              }`}
-            >
-              Line
-            </button>
-            <button
-              type="button"
               onClick={() => setChartMode('candle')}
               className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
                 chartMode === 'candle' ? 'bg-white text-[#111111] shadow-sm' : 'text-ink-500 hover:text-[#111111]'
               }`}
             >
               Candles
+            </button>
+            <button
+              type="button"
+              onClick={() => setChartMode('line')}
+              className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                chartMode === 'line' ? 'bg-white text-[#111111] shadow-sm' : 'text-ink-500 hover:text-[#111111]'
+              }`}
+            >
+              Line
             </button>
           </div>
 
@@ -454,16 +479,13 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
         {activeConePt ? (
           <div className="flex flex-wrap items-center gap-3 text-[#111111]">
             <span className="rounded bg-ink-100 px-1.5 py-0.5 font-semibold">
-              FORECAST · {activeConePt.date} (+{activeConePt.step_days}d)
+              AI CONE · {activeConePt.date} (+{activeConePt.step_days}c)
             </span>
             <span>
               Est: <strong>${activeConePt.expected_price.toFixed(2)}</strong>
             </span>
             <span>
               68% Range: ${activeConePt.range_68_low.toFixed(2)}–${activeConePt.range_68_high.toFixed(2)}
-            </span>
-            <span className="text-ink-500">
-              90% Outer: ${activeConePt.range_90_low.toFixed(2)}–${activeConePt.range_90_high.toFixed(2)}
             </span>
           </div>
         ) : activeBar ? (
@@ -480,9 +502,6 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
             {showSma50 && activeBar.sma50 != null && (
               <span className="text-ink-500">SMA50 {activeBar.sma50.toFixed(2)}</span>
             )}
-            {showRsi && activeBar.rsi14 != null && (
-              <span className="text-[#111111]">RSI {activeBar.rsi14.toFixed(1)}</span>
-            )}
           </div>
         ) : (
           <span>{ticker}</span>
@@ -497,7 +516,7 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
           style={{ height }}
           className="flex items-center justify-center rounded-md border border-ink-200 bg-ink-50 text-xs text-ink-500"
         >
-          No historical price bars available for {ticker}.
+          No procedural candlesticks available for {ticker}.
         </div>
       ) : (
         <svg
@@ -507,7 +526,7 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
           onMouseMove={handlePointerMove}
           onMouseLeave={() => setHoverIdx(null)}
           role="img"
-          aria-label={`${ticker} historical price and quantitative forecast chart`}
+          aria-label={`${ticker} candlestick and AI forecast chart`}
         >
           <defs>
             <linearGradient id={`areaGrad-${ticker}`} x1="0" y1="0" x2="0" y2="1">
@@ -516,28 +535,84 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
             </linearGradient>
           </defs>
 
-          {/* Horizontal Price Gridlines & Right Axis Labels */}
+          {/* Horizontal Price Gridlines */}
           {yTicks.map((t, i) => (
             <g key={i}>
-              <line
-                x1={padLeft}
-                x2={padLeft + plotW}
-                y1={t.y}
-                y2={t.y}
-                stroke="#F1F1F3"
-                strokeWidth="1"
-              />
-              <text
-                x={padLeft + plotW + 8}
-                y={t.y + 3.5}
-                className="fill-ink-400 font-mono text-[10px]"
-              >
+              <line x1={padLeft} x2={padLeft + plotW} y1={t.y} y2={t.y} stroke="#F1F1F3" strokeWidth="1" />
+              <text x={padLeft + plotW + 8} y={t.y + 3.5} className="fill-ink-400 font-mono text-[10px]">
                 ${t.price.toFixed(t.price >= 1000 ? 0 : 2)}
               </text>
             </g>
           ))}
 
-          {/* Volume Histogram Bars (Bottom 16% of Main Plot) */}
+          {/* Active Candle Check Zone Highlight (shows the locked AI prediction vs simulated candles) */}
+          {simulationOverlay && simOriginIdx >= 0 && simOriginIdx < bars.length - 1 && (
+            <g>
+              <rect
+                x={xAt(simOriginIdx)}
+                y={padTop}
+                width={Math.max(4, xAt(bars.length - 1) - xAt(simOriginIdx))}
+                height={mainPlotH}
+                fill={
+                  simulationOverlay.verdict
+                    ? simulationOverlay.verdict.ai_got_it_right
+                      ? '#15803D'
+                      : '#B91C1C'
+                    : '#111111'
+                }
+                fillOpacity="0.045"
+              />
+              {/* Origin Lock Vertical Line */}
+              <line
+                x1={xAt(simOriginIdx)}
+                x2={xAt(simOriginIdx)}
+                y1={padTop}
+                y2={padTop + mainPlotH}
+                stroke="#111111"
+                strokeWidth="1.2"
+                strokeDasharray="3 3"
+              />
+              {/* Start Price Baseline */}
+              <line
+                x1={xAt(simOriginIdx)}
+                x2={xAt(bars.length - 1)}
+                y1={yAt(simulationOverlay.startPrice)}
+                y2={yAt(simulationOverlay.startPrice)}
+                stroke="#71717A"
+                strokeWidth="1"
+                strokeDasharray="2 2"
+              />
+              {/* AI Expected Trajectory Line */}
+              <line
+                x1={xAt(simOriginIdx)}
+                x2={xAt(bars.length - 1)}
+                y1={yAt(simulationOverlay.startPrice)}
+                y2={yAt(simulationOverlay.predictedPrice)}
+                stroke="#111111"
+                strokeWidth="1.5"
+                strokeDasharray="4 3"
+              />
+              {/* Verdict Badge directly on Chart */}
+              {simulationOverlay.verdict && (
+                <g transform={`translate(${Math.max(padLeft + 6, xAt(simOriginIdx) + 6)}, ${padTop + 4})`}>
+                  <rect
+                    x="0"
+                    y="0"
+                    rx="4"
+                    ry="4"
+                    width="116"
+                    height="19"
+                    fill={simulationOverlay.verdict.ai_got_it_right ? '#15803D' : '#B91C1C'}
+                  />
+                  <text x="58" y="13" textAnchor="middle" className="fill-white font-mono text-[9.5px] font-bold">
+                    {simulationOverlay.verdict.ai_got_it_right ? '✓ AI GOT IT RIGHT' : '✗ AI GOT IT WRONG'}
+                  </text>
+                </g>
+              )}
+            </g>
+          )}
+
+          {/* Volume Histogram Bars */}
           {showVolume &&
             bars.map((b, i) => {
               const x = xAt(i);
@@ -558,7 +633,7 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
               );
             })}
 
-          {/* Forecast Cone (90% Outer + 68% Central Range + Expected Trajectory) */}
+          {/* Forward Forecast Cone */}
           {coneGeometry && (
             <g>
               <line
@@ -625,15 +700,25 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
                 const color = isUp ? '#15803D' : '#B91C1C';
                 const bodyTop = Math.min(yOpen, yClose);
                 const bodyH = Math.max(1.5, Math.abs(yClose - yOpen));
+                const isNewlySimulated = simOriginIdx >= 0 && i > simOriginIdx;
                 return (
                   <g key={`c-${i}`}>
-                    <line x1={x} x2={x} y1={yHigh} y2={yLow} stroke={color} strokeWidth="1" />
+                    <line
+                      x1={x}
+                      x2={x}
+                      y1={yHigh}
+                      y2={yLow}
+                      stroke={color}
+                      strokeWidth={isNewlySimulated ? '1.35' : '1'}
+                    />
                     <rect
                       x={x - candleWidth / 2}
                       y={bodyTop}
                       width={candleWidth}
                       height={bodyH}
                       fill={color}
+                      stroke={isNewlySimulated ? '#111111' : 'none'}
+                      strokeWidth={isNewlySimulated ? '0.6' : '0'}
                     />
                   </g>
                 );
@@ -642,40 +727,14 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
           )}
 
           {/* Moving Average Overlays */}
-          {sma20Path && (
-            <path d={sma20Path} fill="none" stroke="#111111" strokeWidth="1.15" strokeOpacity="0.75" />
-          )}
-          {sma50Path && (
-            <path
-              d={sma50Path}
-              fill="none"
-              stroke="#71717A"
-              strokeWidth="1.15"
-              strokeDasharray="4 2"
-            />
-          )}
-          {sma200Path && (
-            <path
-              d={sma200Path}
-              fill="none"
-              stroke="#A1A1AA"
-              strokeWidth="1.25"
-              strokeDasharray="2 2"
-            />
-          )}
+          {sma20Path && <path d={sma20Path} fill="none" stroke="#111111" strokeWidth="1.15" strokeOpacity="0.75" />}
+          {sma50Path && <path d={sma50Path} fill="none" stroke="#71717A" strokeWidth="1.15" strokeDasharray="4 2" />}
+          {sma200Path && <path d={sma200Path} fill="none" stroke="#A1A1AA" strokeWidth="1.25" strokeDasharray="2 2" />}
 
-          {/* Optional RSI(14) Lower Subplot */}
+          {/* RSI(14) Subplot */}
           {rsiHeight > 0 && (
             <g>
-              <line
-                x1={padLeft}
-                x2={padLeft + plotW}
-                y1={rsiTop}
-                y2={rsiTop}
-                stroke="#E4E4E7"
-                strokeWidth="1"
-              />
-              {/* 70 Overbought & 30 Oversold Guides */}
+              <line x1={padLeft} x2={padLeft + plotW} y1={rsiTop} y2={rsiTop} stroke="#E4E4E7" strokeWidth="1" />
               <line
                 x1={padLeft}
                 x2={padLeft + plotW}
@@ -707,7 +766,7 @@ export const FinancialChart: React.FC<FinancialChartProps> = ({
             </g>
           )}
 
-          {/* Interactive Hover Crosshair */}
+          {/* Interactive Crosshair */}
           {hoverIdx != null && hoverIdx >= 0 && hoverIdx < totalSlots && (
             <g>
               <line

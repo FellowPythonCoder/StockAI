@@ -1,9 +1,8 @@
-"""FastAPI entrypoint for MARKET / SIGNAL."""
+"""FastAPI entrypoint for MARKET / SIGNAL Procedural Stock & AI Candle Verification Platform."""
 
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -12,22 +11,30 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import MODEL_VERSION
-from .config import BASE_DIR, settings
-from .providers.cache import market_cache
+from .config import BASE_DIR
 from .providers.router import market_router
 from .schemas import (
+    CandleAdvanceRequest,
+    CandleAdvanceResponse,
     ChartSeriesResponse,
+    GenerateStockRequest,
+    GenerateStockResponse,
     HorizonCode,
     InstrumentSummary,
     MarketOverviewResponse,
-    ProviderConfigRequest,
     StockAnalysisResponse,
     TrackedForecastRecord,
     WatchlistAddRequest,
     WatchlistItemOut,
     WatchlistReorderRequest,
 )
-from .service import build_stock_analysis, build_watchlist_view, seed_initial_audit_history
+from .service import (
+    advance_candles_and_verify_ai,
+    build_stock_analysis,
+    build_watchlist_view,
+    create_random_stock_and_analyze,
+    seed_initial_audit_history,
+)
 from .tracking.store import tracking_store
 
 FRONTEND_BUILD_DIR = BASE_DIR.parent / "docs"
@@ -40,9 +47,9 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="MARKET / SIGNAL Quantitative API",
-    version="2.4.0",
-    description="Quantitative stock forecasting, walk-forward evaluation, and market intelligence API.",
+    title="MARKET / SIGNAL Procedural Stock & AI Verification API",
+    version="3.0.0",
+    description="Procedural random stock generator, stochastic candlestick progression, and quantitative AI forecast verification.",
     lifespan=lifespan,
 )
 
@@ -57,61 +64,67 @@ app.add_middleware(
 
 @app.get("/api/health")
 def api_health() -> dict:
-    configured = settings.configured_providers()
     return {
         "status": "ok",
         "model_version": MODEL_VERSION,
-        "runtime": "fastapi-quant-engine",
-        "configured_live_providers": configured,
-        "demo_or_archive_fallback_active": len(configured) == 0,
+        "runtime": "fastapi-procedural-candle-engine",
     }
 
 
 @app.get("/api/provider-status")
 def get_provider_status() -> dict:
-    configured = settings.configured_providers()
-    _, sample_prov = market_router.get_daily_series("SPY", force_refresh=False)
+    _, sample_prov = market_router.get_daily_series("MSX", force_refresh=False)
     return {
-        "active_mode": sample_prov.mode,
+        "active_mode": "live",
         "provider_name": sample_prov.provider_name,
         "source_attribution": sample_prov.source_attribution,
         "as_of_timestamp": sample_prov.as_of_timestamp,
         "market_status": sample_prov.market_status,
-        "is_demo_or_archive": sample_prov.is_demo_or_archive,
-        "configured_providers": configured,
+        "is_demo_or_archive": False,
+        "configured_providers": ["procedural-garch-candle-engine"],
         "setup_instructions": (
-            "Set FINNHUB_API_KEY, ALPHAVANTAGE_API_KEY, or TWELVEDATA_API_KEY in backend/.env "
-            "(or configure via Server Feed Settings) to switch from Verified Historical Demo Snapshot to Live API feeds. "
-            "Keys stay strictly on the server and are never exposed in client code."
+            "All equities and benchmarks are 100% synthetic and procedurally generated using multi-regime GARCH(1,1) "
+            "stochastic candlesticks. Generate new stocks anytime and advance future candles randomly to test whether "
+            "the AI forecast got it right."
         ),
     }
 
 
-@app.post("/api/provider-config")
-def set_server_provider_key(req: ProviderConfigRequest) -> dict:
-    key = req.api_key.strip()
-    if req.provider == "finnhub":
-        settings.finnhub_api_key = key
-    elif req.provider == "alphavantage":
-        settings.alphavantage_api_key = key
-    elif req.provider == "twelvedata":
-        settings.twelvedata_api_key = key
-    market_cache.clear()
-    return {
-        "updated": True,
-        "provider": req.provider,
-        "configured_providers": settings.configured_providers(),
-    }
-
-
 @app.get("/api/search", response_model=list[InstrumentSummary])
-def search_stocks(q: str = Query(default="", max_length=40), limit: int = Query(default=20, ge=1, le=50)):
+def search_stocks(q: str = Query(default="", max_length=40), limit: int = Query(default=24, ge=1, le=50)):
     return market_router.search_instruments(q, limit=limit)
 
 
 @app.get("/api/market-overview", response_model=MarketOverviewResponse)
 def market_overview(refresh: bool = Query(default=False)):
     return market_router.get_market_overview(force_refresh=refresh)
+
+
+@app.post("/api/stocks/generate", response_model=GenerateStockResponse)
+def generate_random_stock_endpoint(payload: GenerateStockRequest):
+    return create_random_stock_and_analyze(
+        regime=payload.regime,
+        sector=payload.sector,
+        custom_ticker=payload.custom_ticker,
+        custom_name=payload.custom_name,
+        horizon=payload.horizon,
+        timeframe=payload.timeframe,
+    )
+
+
+@app.post("/api/stocks/{ticker}/advance", response_model=CandleAdvanceResponse)
+def advance_stock_candles_endpoint(ticker: str, payload: CandleAdvanceRequest):
+    try:
+        return advance_candles_and_verify_ai(
+            ticker=ticker,
+            horizon=payload.horizon,
+            steps=payload.steps,
+            timeframe=payload.timeframe,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/stocks/{ticker}/analysis", response_model=StockAnalysisResponse)
@@ -131,7 +144,7 @@ def stock_analysis(
 @app.get("/api/stocks/{ticker}/chart", response_model=ChartSeriesResponse)
 def stock_chart(
     ticker: str,
-    timeframe: Literal["1D", "1W", "1M", "3M", "1Y", "5Y"] = Query(default="1Y"),
+    timeframe: Literal["1D", "1W", "1M", "3M", "1Y", "5Y"] = Query(default="3M"),
     refresh: bool = Query(default=False),
 ):
     try:
@@ -149,7 +162,8 @@ def get_watchlist(refresh: bool = Query(default=False)):
 def add_to_watchlist(payload: WatchlistAddRequest):
     sym = payload.ticker.upper().strip()
     try:
-        market_router.get_instrument_summary(sym)
+        inst = market_router.get_instrument_summary(sym)
+        sym = inst.ticker
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     tracking_store.add_or_update_watchlist(sym, payload.preferred_horizon)
@@ -183,7 +197,6 @@ def list_tracking_history(
     return tracking_store.list_tracked_forecasts(ticker=ticker, record_origin=origin, limit=limit)
 
 
-# Serve static SPA bundle if built
 if FRONTEND_BUILD_DIR.exists():
     assets_dir = FRONTEND_BUILD_DIR / "assets"
     if assets_dir.exists():
@@ -191,9 +204,6 @@ if FRONTEND_BUILD_DIR.exists():
     images_dir = FRONTEND_BUILD_DIR / "images"
     if images_dir.exists():
         app.mount("/images", StaticFiles(directory=str(images_dir)), name="images")
-    static_data_dir = FRONTEND_BUILD_DIR / "static-data"
-    if static_data_dir.exists():
-        app.mount("/static-data", StaticFiles(directory=str(static_data_dir)), name="static-data")
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
@@ -209,5 +219,5 @@ def serve_spa(full_path: str):
             return FileResponse(str(index_html))
     return {
         "service": "MARKET / SIGNAL API",
-        "message": "Frontend bundle not yet built. Run `npm run build` in `frontend/` or visit `/docs`.",
+        "message": "Frontend bundle not yet built. Run `npm run build` in `frontend/`.",
     }

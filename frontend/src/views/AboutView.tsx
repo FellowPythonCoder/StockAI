@@ -1,13 +1,13 @@
 import React from 'react';
-import { BookOpen, Cpu, Database, Scale, ShieldAlert } from 'lucide-react';
+import { BookOpen, Cpu, Dices, Play, Scale, ShieldAlert } from 'lucide-react';
 import { SITE_COPY } from '../config/siteCopy';
 
 interface AboutViewProps {
-  onOpenFeedSettings: () => void;
+  onGenerateRandomStock: () => void;
   onStartAnalyzing: () => void;
 }
 
-export const AboutView: React.FC<AboutViewProps> = ({ onOpenFeedSettings, onStartAnalyzing }) => {
+export const AboutView: React.FC<AboutViewProps> = ({ onGenerateRandomStock, onStartAnalyzing }) => {
   return (
     <div className="mx-auto max-w-[1120px] px-4 py-10 sm:px-6 lg:px-8 space-y-14">
       {/* Header */}
@@ -16,15 +16,15 @@ export const AboutView: React.FC<AboutViewProps> = ({ onOpenFeedSettings, onStar
           ABOUT MARKET / SIGNAL
         </div>
         <h1 className="text-3xl font-semibold tracking-tight text-[#111111] sm:text-4xl">
-          Quantitative equity forecasting built on empirical rigor and transparent uncertainty.
+          Procedural synthetic stocks, quantitative AI forecasts, and live candle verification.
         </h1>
         <p className="text-base leading-relaxed text-ink-500">
-          MARKET / SIGNAL is a serious financial analysis platform designed to answer a single question with maximum
-          intellectual honesty: <em>“What might this stock do next, and how reliable is that forecast?”</em>
+          MARKET / SIGNAL is a synthetic financial laboratory built to test a simple question honestly:{' '}
+          <em>&ldquo;When an AI predicts where a candlestick chart goes next, how often does it actually get it right?&rdquo;</em>
         </p>
       </section>
 
-      {/* Personal Origin Section ("Made because Danish asked.") */}
+      {/* Personal Origin Section ("my friend Tanish said") */}
       <section className="grid grid-cols-1 md:grid-cols-12 gap-8 items-center rounded-xl border border-ink-200 bg-ink-50/50 p-6 sm:p-8">
         <div className="md:col-span-7 space-y-3">
           <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-400">
@@ -43,62 +43,59 @@ export const AboutView: React.FC<AboutViewProps> = ({ onOpenFeedSettings, onStar
         </div>
       </section>
 
-      {/* Architecture & Quantitative Pipeline Separation */}
+      {/* Architecture */}
       <section className="space-y-6">
-        <h2 className="text-xl font-semibold text-[#111111]">Four-Layer Quantitative Architecture</h2>
+        <h2 className="text-xl font-semibold text-[#111111]">How the Simulator &amp; AI Checker Work</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div className="rounded-lg border border-ink-200 bg-white p-5 space-y-2">
             <div className="flex items-center gap-2 text-xs font-mono uppercase text-ink-500">
-              <Database className="h-4 w-4 text-[#111111]" />
-              <span>01 · Data Retrieval &amp; Normalization</span>
+              <Dices className="h-4 w-4 text-[#111111]" />
+              <span>01 · Procedural Random Stock Generator</span>
             </div>
-            <h3 className="text-sm font-semibold text-[#111111]">Verified Market Feeds &amp; Calendar Integrity</h3>
+            <h3 className="text-sm font-semibold text-[#111111]">Zero Real Tickers — 100% Synthetic Companies</h3>
             <p className="text-xs leading-relaxed text-ink-500">
-              Connects to Finnhub, Alpha Vantage, Twelve Data, and Yahoo Finance with server-side secret key isolation,
-              token-bucket rate limiting, NYSE holiday/weekend calendar alignment, and OHLC invariant checks. When run
-              without live API keys or deployed statically on GitHub Pages, the platform serves a clearly labeled
-              verified historical market snapshot — never fabricated price series.
+              Generates fictional companies across Quantum, Neural Systems, Autonomous Robotics, Clean Fusion, and
+              Programmable Biology with multi-year OHLCV candlestick histories driven by GARCH(1,1) volatility
+              clustering, momentum persistence, and fat-tailed random shocks.
             </p>
           </div>
 
           <div className="rounded-lg border border-ink-200 bg-white p-5 space-y-2">
             <div className="flex items-center gap-2 text-xs font-mono uppercase text-ink-500">
               <Cpu className="h-4 w-4 text-[#111111]" />
-              <span>02 · Multi-Horizon Quantitative Engine</span>
+              <span>02 · Strictly Causal Quantitative AI Engine</span>
             </div>
-            <h3 className="text-sm font-semibold text-[#111111]">Causal Factor Ridge &amp; Conformal Volatility Cones</h3>
+            <h3 className="text-sm font-semibold text-[#111111]">Past Candles Only — Zero Peeking Ahead</h3>
             <p className="text-xs leading-relaxed text-ink-500">
-              Evaluates 16 strictly causal features across multi-scale momentum, SMA(20/50/200) alignment, Kaufman trend
-              efficiency, Wilder RSI(14), RiskMetrics EWMA &amp; Parkinson range volatility, rolling 60-day S&amp;P 500
-              beta, and GICS sector relative strength. Ensembles are used only when out-of-sample validation proves
-              superior MAE over single models.
+              The AI model evaluates moving-average structure (SMA 20/50/200), multi-scale momentum, Wilder RSI(14)
+              mean-reversion tension, EWMA volatility, and synthetic sector spread using strictly past candles — it
+              never has access to upcoming random shocks.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-ink-200 bg-white p-5 space-y-2">
+            <div className="flex items-center gap-2 text-xs font-mono uppercase text-ink-500">
+              <Play className="h-4 w-4 text-[#111111]" />
+              <span>03 · Live Random Candle Progression</span>
+            </div>
+            <h3 className="text-sm font-semibold text-[#111111]">Animate Candlesticks &amp; Check If AI Got It Right</h3>
+            <p className="text-xs leading-relaxed text-ink-500">
+              Lock in the AI&apos;s prediction over 1, 5, 21, 63, or 126 candles, then run random future candlesticks
+              live onto the chart. When the final candle closes, the simulator immediately checks whether the AI got
+              the direction right and whether price stayed inside the 68% conformal cone.
             </p>
           </div>
 
           <div className="rounded-lg border border-ink-200 bg-white p-5 space-y-2">
             <div className="flex items-center gap-2 text-xs font-mono uppercase text-ink-500">
               <Scale className="h-4 w-4 text-[#111111]" />
-              <span>03 · Horizon-Purged Walk-Forward Verification</span>
+              <span>04 · Dual Full-Stack &amp; GitHub Pages Ready</span>
             </div>
-            <h3 className="text-sm font-semibold text-[#111111]">Zero Leakage &amp; Calibrated Probabilities</h3>
+            <h3 className="text-sm font-semibold text-[#111111]">Runs Anywhere Without External API Keys</h3>
             <p className="text-xs leading-relaxed text-ink-500">
-              At every historical evaluation step <em>t</em> for horizon <em>h</em>, training samples are strictly
-              restricted to origins <em>s ≤ t − h</em> so zero future price information leaks into model weights,
-              scalers, or probability calibration. Performance is benchmarked directly against No-Change and
-              Historical-Average Return baselines.
-            </p>
-          </div>
-
-          <div className="rounded-lg border border-ink-200 bg-white p-5 space-y-2">
-            <div className="flex items-center gap-2 text-xs font-mono uppercase text-ink-500">
-              <BookOpen className="h-4 w-4 text-[#111111]" />
-              <span>04 · Evidence-Attributed AI Explanations</span>
-            </div>
-            <h3 className="text-sm font-semibold text-[#111111]">Facts Distinguished from Assumptions</h3>
-            <p className="text-xs leading-relaxed text-ink-500">
-              Rather than using LLM self-confidence as a proxy for forecast accuracy, explanations are synthesized
-              directly from standardized factor weights, verified TTM fundamentals, scheduled earnings dates, and
-              explicit price invalidation thresholds.
+              Powered by both a Python FastAPI quantitative server and a matching client-side TypeScript engine so
+              unlimited random stock generation and live candle verification work seamlessly even on static GitHub
+              Pages hosting.
             </p>
           </div>
         </div>
@@ -113,8 +110,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onOpenFeedSettings, onStar
             className="h-60 w-full object-cover"
           />
           <figcaption className="border-t border-ink-100 px-4 py-3 text-xs text-ink-500">
-            Split-conformal residual quantiles scale conditional RiskMetrics EWMA volatility across 1-day to 6-month
-            forecast horizons.
+            Split-conformal 68% and 90% cones compared directly against unfolding stochastic candlesticks.
           </figcaption>
         </figure>
 
@@ -125,17 +121,16 @@ export const AboutView: React.FC<AboutViewProps> = ({ onOpenFeedSettings, onStar
             className="h-60 w-full object-cover"
           />
           <figcaption className="border-t border-ink-100 px-4 py-3 text-xs text-ink-500">
-            Structural discipline: clean monochrome hierarchy keeps analytical focus on price series, error metrics, and
-            risk context.
+            Monochrome black-and-white visual system reserving green and red strictly for candle action and AI verdicts.
           </figcaption>
         </figure>
       </section>
 
-      {/* Responsible Forecasting Disclosure */}
+      {/* Disclosure */}
       <section className="rounded-lg border border-ink-200 bg-ink-50 p-6 space-y-3">
         <div className="flex items-center gap-2 text-xs font-mono font-semibold uppercase tracking-wider text-[#111111]">
           <ShieldAlert className="h-4 w-4" />
-          <span>Responsible Forecasting &amp; Risk Disclosure</span>
+          <span>Synthetic Sandbox Note</span>
         </div>
         <p className="text-xs sm:text-sm leading-relaxed text-ink-700">
           {SITE_COPY.responsibleDisclosure.detailedStatement}
@@ -143,17 +138,19 @@ export const AboutView: React.FC<AboutViewProps> = ({ onOpenFeedSettings, onStar
         <div className="pt-2 flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={onStartAnalyzing}
-            className="rounded-md bg-[#111111] px-4 py-2 text-xs font-medium text-white hover:bg-ink-700"
+            onClick={onGenerateRandomStock}
+            className="inline-flex items-center gap-1.5 rounded-md bg-[#111111] px-4 py-2 text-xs font-medium text-white hover:bg-ink-700"
           >
-            Open AI Market Analyst
+            <Dices className="h-3.5 w-3.5" />
+            <span>Generate a Random Stock</span>
           </button>
           <button
             type="button"
-            onClick={onOpenFeedSettings}
-            className="rounded-md border border-ink-200 bg-white px-4 py-2 text-xs font-medium text-[#111111] hover:border-[#111111]"
+            onClick={onStartAnalyzing}
+            className="inline-flex items-center gap-1.5 rounded-md border border-ink-200 bg-white px-4 py-2 text-xs font-medium text-[#111111] hover:border-[#111111]"
           >
-            Configure Live Data Provider
+            <BookOpen className="h-3.5 w-3.5" />
+            <span>Open Candle Simulator</span>
           </button>
         </div>
       </section>

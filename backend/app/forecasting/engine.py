@@ -40,8 +40,8 @@ FACTOR_META: dict[str, tuple[str, str, str]] = {
     "parkinson_ratio": ("Intraday Range Expansion", "volatility", "High-low range volatility relative to close-to-close"),
     "vol_regime_z": ("Volatility Regime Shift", "volatility", "Current 20d volatility relative to 6-month baseline"),
     "rel_vol_20": ("Relative Volume (20d)", "volume", "Participation intensity vs 20-session average turnover"),
-    "market_alpha_21d": ("Beta-Adjusted S&P 500 Alpha", "relative_strength", "Idiosyncratic 21-day return net of rolling market beta"),
-    "sector_rel_21d": ("Sector Relative Strength", "relative_strength", "21-day performance spread vs GICS sector ETF"),
+    "market_alpha_21d": ("Beta-Adjusted MSX 500 Alpha", "relative_strength", "Idiosyncratic 21-day return net of rolling synthetic market beta"),
+    "sector_rel_21d": ("Sector Relative Strength", "relative_strength", "21-day performance spread vs synthetic sector index"),
 }
 
 
@@ -53,12 +53,11 @@ def assess_data_quality(
     has_core_fund = fundamentals.pe_trailing is not None or fundamentals.market_cap is not None
     if provenance.staleness_warning:
         return "Limited", f"Price history has {n_bars} bars, but {provenance.staleness_warning}"
-    if n_bars >= 900 and has_core_fund:
-        mode_note = "verified historical snapshot" if provenance.is_demo_or_archive else "live/delayed provider feed"
-        return "High", f"{n_bars:,} verified daily candles (~{n_bars / 252:.1f} yrs), complete benchmark/sector series, and fundamental coverage ({mode_note})."
-    if n_bars >= 500:
-        return "Medium", f"{n_bars:,} verified daily candles (~{n_bars / 252:.1f} yrs) with benchmark alignment; partial fundamental history."
-    return "Limited", f"Shorter {n_bars}-session price series limits multi-cycle walk-forward validation depth."
+    if n_bars >= 750 and has_core_fund:
+        return "High", f"{n_bars:,} procedural daily candlesticks (~{n_bars / 252:.1f} yrs), benchmark/sector alignment, and synthetic fundamentals."
+    if n_bars >= 450:
+        return "Medium", f"{n_bars:,} procedural daily candlesticks (~{n_bars / 252:.1f} yrs) with synthetic benchmark alignment."
+    return "Limited", f"Shorter {n_bars}-session candle series limits multi-cycle walk-forward validation depth."
 
 
 def generate_horizon_forecast_and_backtest(

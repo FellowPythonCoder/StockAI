@@ -5,18 +5,20 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
-  Info,
   RefreshCw,
   Search,
 } from 'lucide-react';
 import {
+  CandleCheckVerdict,
   ChartSeriesResponse,
   HorizonCode,
   MarketOverviewResponse,
+  RegimeArchetype,
   StockAnalysisResponse,
   TimeframeCode,
 } from '../types';
-import { FinancialChart } from '../components/FinancialChart';
+import { CandleSimulatorPanel, SimulationProgressState } from '../components/CandleSimulatorPanel';
+import { ChartSimulationOverlay, FinancialChart } from '../components/FinancialChart';
 import { ForecastPanel } from '../components/ForecastPanel';
 import { MarketOverviewStrip } from '../components/MarketOverviewStrip';
 import { SITE_COPY } from '../config/siteCopy';
@@ -25,6 +27,7 @@ interface MarketAnalystViewProps {
   analysis: StockAnalysisResponse | null;
   chart: ChartSeriesResponse | null;
   overview: MarketOverviewResponse | null;
+  recentTickers: string[];
   selectedHorizon: HorizonCode;
   onSelectHorizon: (h: HorizonCode) => void;
   timeframe: TimeframeCode;
@@ -32,6 +35,20 @@ interface MarketAnalystViewProps {
   onSelectTicker: (ticker: string) => void;
   onOpenSearchModal: () => void;
   onRefresh: () => void;
+  regime: RegimeArchetype;
+  onChangeRegime: (r: RegimeArchetype) => void;
+  onGenerateRandomStock: () => void;
+  onRunHorizonCheck: () => void;
+  onStepOneCandle: () => void;
+  autoLoop: boolean;
+  onToggleAutoLoop: () => void;
+  speedMs: number;
+  onChangeSpeedMs: (ms: number) => void;
+  simProgress: SimulationProgressState | null;
+  simOverlay: ChartSimulationOverlay | null;
+  latestVerdict: CandleCheckVerdict | null;
+  verdictHistory: CandleCheckVerdict[];
+  generatingStock: boolean;
   isInWatchlist: boolean;
   onToggleWatchlist: () => void;
   onNavigateForecasts: () => void;
@@ -40,12 +57,11 @@ interface MarketAnalystViewProps {
   error: string | null;
 }
 
-const QUICK_SYMBOLS = ['NVDA', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'AMD', 'LLY', 'JPM', 'SPY', 'QQQ'];
-
 export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
   analysis,
   chart,
   overview,
+  recentTickers,
   selectedHorizon,
   onSelectHorizon,
   timeframe,
@@ -53,6 +69,20 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
   onSelectTicker,
   onOpenSearchModal,
   onRefresh,
+  regime,
+  onChangeRegime,
+  onGenerateRandomStock,
+  onRunHorizonCheck,
+  onStepOneCandle,
+  autoLoop,
+  onToggleAutoLoop,
+  speedMs,
+  onChangeSpeedMs,
+  simProgress,
+  simOverlay,
+  latestVerdict,
+  verdictHistory,
+  generatingStock,
   isInWatchlist,
   onToggleWatchlist,
   onNavigateForecasts,
@@ -60,16 +90,15 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
   loadingChart,
   error,
 }) => {
-  const [showMacroContext, setShowMacroContext] = useState<boolean>(true);
+  const [showMacroContext, setShowMacroContext] = useState<boolean>(false);
 
   const isUp = (analysis?.change_pct ?? 0) >= 0;
-  const prov = analysis?.provenance;
   const fund = analysis?.fundamentals;
   const fc = analysis?.forecast;
 
   return (
     <div className="mx-auto max-w-[1360px] px-4 py-6 sm:px-6 lg:px-8 space-y-6">
-      {/* Prominent Stock Search & Quick Switch Bar */}
+      {/* Synthetic Stock Search & Quick Switch Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-lg border border-ink-200 bg-white p-3">
         <button
           type="button"
@@ -78,7 +107,7 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
         >
           <span className="flex items-center gap-2.5 truncate">
             <Search className="h-4 w-4 text-ink-400 shrink-0" />
-            <span>Search company name or ticker (AAPL, NVDA, MSFT, SPY)...</span>
+            <span>Search synthetic company or type any 4-letter ticker to generate...</span>
           </span>
           <kbd className="ml-2 rounded border border-ink-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-ink-500">
             /
@@ -86,7 +115,7 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
         </button>
 
         <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 md:pb-0">
-          {QUICK_SYMBOLS.map((sym) => {
+          {recentTickers.map((sym) => {
             const active = analysis?.instrument.ticker === sym;
             return (
               <button
@@ -106,15 +135,15 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
         </div>
       </div>
 
-      {/* Collapsible Market Overview Strip */}
-      <div className="rounded-lg border border-ink-200 bg-ink-50/40 px-4 py-3">
-        <div className="flex items-center justify-between">
+      {/* Collapsible Synthetic Market Overview Strip */}
+      <div className="rounded-lg border border-ink-200 bg-ink-50/40 px-4 py-2.5">
+        <div className="flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={() => setShowMacroContext((v) => !v)}
             className="inline-flex items-center gap-2 text-xs font-medium text-[#111111]"
           >
-            <span>Broad Market &amp; Sector Context</span>
+            <span>Synthetic Market &amp; Sector Indices</span>
             {showMacroContext ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </button>
           {overview && !showMacroContext && (
@@ -138,46 +167,25 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
         )}
       </div>
 
-      {/* Error State */}
       {error && (
         <div className="rounded-lg border border-down-border bg-down-soft p-4 text-sm text-down">
-          <div className="font-semibold">Unable to complete stock analysis</div>
+          <div className="font-semibold">Unable to complete synthetic stock analysis</div>
           <p className="mt-1 text-xs leading-relaxed">{error}</p>
         </div>
       )}
 
-      {/* Demo / Provenance Notice Banner when running without live API key */}
-      {prov?.is_demo_or_archive && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ink-200 bg-ink-50 px-4 py-2.5 text-xs text-ink-700">
-          <div className="flex items-center gap-2">
-            <Info className="h-4 w-4 shrink-0 text-ink-500" />
-            <span>
-              <strong>{prov.provider_name}:</strong> {prov.note || prov.source_attribution} (Data through{' '}
-              <span className="font-mono">{prov.as_of_timestamp}</span>).
-            </span>
-          </div>
-          {prov.staleness_warning && (
-            <span className="font-mono text-[11px] text-down">{prov.staleness_warning}</span>
-          )}
-        </div>
-      )}
-
-      {/* Loading Skeleton Guard: never show stale success state as completed while recalculating */}
       {loadingAnalysis && !analysis ? (
         <div className="rounded-lg border border-ink-200 bg-white p-12 text-center space-y-3">
           <RefreshCw className="mx-auto h-5 w-5 animate-spin text-[#111111]" />
           <div className="text-sm font-medium text-[#111111]">
-            Running chronological walk-forward calibration &amp; multi-horizon forecast...
+            Generating synthetic candlestick history &amp; running quantitative AI calibration...
           </div>
-          <p className="text-xs text-ink-500">
-            Retrieving verified OHLCV series, benchmark beta, and evaluating out-of-sample error bounds.
-          </p>
         </div>
       ) : (
         analysis &&
         fc && (
           <>
-            {/* Selected Stock Primary Header */}
+            {/* Selected Synthetic Stock Header */}
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-ink-200 pb-5">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -192,28 +200,24 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
                   <span className="text-4xl font-semibold tracking-tight text-[#111111]">
                     ${analysis.latest_price.toFixed(2)}
                   </span>
-                  <span
-                    className={`font-mono text-base font-semibold ${
-                      isUp ? 'text-up' : 'text-down'
-                    }`}
-                  >
+                  <span className={`font-mono text-base font-semibold ${isUp ? 'text-up' : 'text-down'}`}>
                     {isUp ? '+' : ''}
                     {analysis.change_dollar.toFixed(2)} ({isUp ? '+' : ''}
                     {analysis.change_pct.toFixed(2)}%)
                   </span>
                   <span className="text-xs text-ink-400">
-                    Day Range: ${analysis.day_low.toFixed(2)} – ${analysis.day_high.toFixed(2)} · Vol:{' '}
+                    Candle High/Low: ${analysis.day_low.toFixed(2)} – ${analysis.day_high.toFixed(2)} · Vol:{' '}
                     {analysis.day_volume.toLocaleString()}
                   </span>
                 </div>
 
                 <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-ink-500">
-                  <span>{analysis.provenance.market_status}</span>
+                  <span>{analysis.instrument.industry}</span>
                   <span>·</span>
-                  <span>Latest bar: {analysis.provenance.as_of_timestamp}</span>
+                  <span>Current Candle Date: {analysis.provenance.as_of_timestamp}</span>
                   <span>·</span>
                   <span className="uppercase font-mono text-[11px] rounded bg-ink-100 px-1.5 py-0.5 text-[#111111]">
-                    {analysis.provenance.mode.replace('_', ' ')}
+                    SYNTHETIC CANDLES
                   </span>
                 </div>
               </div>
@@ -236,7 +240,7 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
                   ) : (
                     <>
                       <Bookmark className="h-3.5 w-3.5" />
-                      <span>Add to Watchlist</span>
+                      <span>Save to Watchlist</span>
                     </>
                   )}
                 </button>
@@ -244,19 +248,37 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
                 <button
                   type="button"
                   onClick={onRefresh}
-                  disabled={loadingAnalysis || loadingChart}
+                  disabled={loadingAnalysis || loadingChart || Boolean(simProgress?.isAnimating)}
                   className="inline-flex items-center gap-1.5 rounded-md border border-ink-200 bg-white px-3.5 py-2 text-xs font-medium text-[#111111] hover:border-[#111111] disabled:opacity-50 transition-colors"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${loadingAnalysis || loadingChart ? 'animate-spin' : ''}`} />
-                  <span>{loadingAnalysis ? 'Recalculating...' : 'Refresh Analysis'}</span>
+                  <span>Recalculate</span>
                 </button>
               </div>
             </div>
 
-            {/* Primary Analysis Workspace: Chart (Left 8) + AI Forecast Panel (Right 4) */}
+            {/* Interactive Candle Simulator & AI Accuracy Checker Bar */}
+            <CandleSimulatorPanel
+              forecast={fc}
+              regime={regime}
+              onChangeRegime={onChangeRegime}
+              onGenerateRandomStock={onGenerateRandomStock}
+              onRunHorizonCheck={onRunHorizonCheck}
+              onStepOneCandle={onStepOneCandle}
+              autoLoop={autoLoop}
+              onToggleAutoLoop={onToggleAutoLoop}
+              speedMs={speedMs}
+              onChangeSpeedMs={onChangeSpeedMs}
+              progress={simProgress}
+              latestVerdict={latestVerdict && latestVerdict.ticker === analysis.instrument.ticker ? latestVerdict : latestVerdict}
+              verdictHistory={verdictHistory}
+              generatingStock={generatingStock}
+            />
+
+            {/* Primary Analysis Workspace: Candlestick Chart (Left 8) + AI Forecast Panel (Right 4) */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               <div className="lg:col-span-8 rounded-lg border border-ink-200 bg-white p-4 sm:p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)] relative">
-                {(loadingChart || loadingAnalysis) && (
+                {(loadingChart || loadingAnalysis) && !simProgress?.isAnimating && (
                   <div className="absolute right-5 top-4 z-10 inline-flex items-center gap-1.5 rounded bg-ink-100 px-2 py-0.5 text-[11px] font-mono text-ink-700">
                     <RefreshCw className="h-3 w-3 animate-spin" />
                     <span>Updating...</span>
@@ -268,6 +290,7 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
                   timeframe={timeframe}
                   onChangeTimeframe={onChangeTimeframe}
                   forecast={fc}
+                  simulationOverlay={simOverlay}
                   height={420}
                   fallbackNotice={chart?.fallback_notice}
                 />
@@ -289,36 +312,33 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-200 px-5 py-3.5">
                 <div>
                   <h2 className="text-sm font-semibold text-[#111111]">
-                    Multi-Horizon Forecast Term Structure ({analysis.instrument.ticker})
+                    Multi-Horizon AI Forecast Term Structure ({analysis.instrument.ticker})
                   </h2>
                   <p className="text-xs text-ink-500">
-                    Click any evaluated horizon to update the chart forecast cone and factor breakdown.
+                    Click any candle horizon to select how many random future candles will run when checking the AI.
                   </p>
                 </div>
-                <span className="text-[11px] font-mono text-ink-400">
-                  Selected Model: {fc.selected_model_name}
-                </span>
+                <span className="text-[11px] font-mono text-ink-400">Model: {fc.selected_model_name}</span>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-ink-200 bg-ink-50/70 text-[11px] font-mono uppercase text-ink-500">
-                      <th className="py-2.5 px-4">Horizon</th>
+                      <th className="py-2.5 px-4">Candle Horizon</th>
                       <th className="py-2.5 px-4">Target Date</th>
-                      <th className="py-2.5 px-4">Outlook</th>
+                      <th className="py-2.5 px-4">AI Call</th>
                       <th className="py-2.5 px-4 text-right">Expected Return</th>
-                      <th className="py-2.5 px-4 text-right">68% Price Range</th>
+                      <th className="py-2.5 px-4 text-right">68% Price Cone</th>
                       <th className="py-2.5 px-4 text-right">Prob. Higher</th>
-                      <th className="py-2.5 px-4 text-right">Backtest Dir. Acc</th>
-                      <th className="py-2.5 px-4 text-right">Backtest MAE (vs Baseline)</th>
+                      <th className="py-2.5 px-4 text-right">Backtest Hit Rate</th>
+                      <th className="py-2.5 px-4 text-right">Backtest MAE</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100 text-xs tabular-nums">
                     {analysis.all_horizons_summary.map((row) => {
                       const active = row.horizon_code === selectedHorizon;
-                      const rUp = row.direction === 'upside';
-                      const rDown = row.direction === 'downside';
+                      const rUp = row.expected_return_pct >= 0;
                       return (
                         <tr
                           key={row.horizon_code}
@@ -327,22 +347,16 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
                             active ? 'bg-ink-100/70 font-medium' : 'hover:bg-ink-50'
                           }`}
                         >
-                          <td className="py-3 px-4 text-[#111111]">{row.horizon_label}</td>
+                          <td className="py-3 px-4 text-[#111111]">
+                            {row.horizon_label} ({row.horizon_days}c)
+                          </td>
                           <td className="py-3 px-4 font-mono text-ink-500">{row.target_date}</td>
                           <td className="py-3 px-4">
-                            <span
-                              className={
-                                rUp ? 'text-up font-medium' : rDown ? 'text-down font-medium' : 'text-ink-700'
-                              }
-                            >
-                              {row.direction_label}
+                            <span className={rUp ? 'text-up font-medium' : 'text-down font-medium'}>
+                              {rUp ? 'UP · Upside' : 'DOWN · Downside'}
                             </span>
                           </td>
-                          <td
-                            className={`py-3 px-4 text-right font-mono font-semibold ${
-                              rUp ? 'text-up' : rDown ? 'text-down' : 'text-[#111111]'
-                            }`}
-                          >
+                          <td className={`py-3 px-4 text-right font-mono font-semibold ${rUp ? 'text-up' : 'text-down'}`}>
                             {row.expected_return_pct >= 0 ? '+' : ''}
                             {row.expected_return_pct.toFixed(2)}%
                           </td>
@@ -367,47 +381,33 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
               </div>
             </section>
 
-            {/* Fundamentals + Factor Attribution + Evidence Separation */}
+            {/* Synthetic Fundamentals + Factor Attribution */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Key Financial Metrics (5 cols) */}
               <section className="lg:col-span-5 rounded-lg border border-ink-200 bg-white p-5">
                 <div className="flex items-center justify-between border-b border-ink-200 pb-3">
-                  <h2 className="text-sm font-semibold text-[#111111]">Financial Fundamentals &amp; Risk Metrics</h2>
-                  <span className="text-[11px] font-mono text-ink-400">
-                    As of {fund?.fundamentals_as_of}
-                  </span>
+                  <h2 className="text-sm font-semibold text-[#111111]">Synthetic Company Profile &amp; Risk Metrics</h2>
+                  <span className="text-[11px] font-mono text-ink-400">As of {fund?.fundamentals_as_of}</span>
                 </div>
 
                 <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 text-xs tabular-nums">
                   {[
-                    ['Market Capitalization', fund?.market_cap_fmt || 'N/A'],
+                    ['Synthetic Market Cap', fund?.market_cap_fmt || 'N/A'],
                     ['Trailing P/E', fund?.pe_trailing != null ? `${fund.pe_trailing.toFixed(2)}x` : 'N/A'],
                     ['Forward P/E', fund?.pe_forward != null ? `${fund.pe_forward.toFixed(2)}x` : 'N/A'],
-                    ['Diluted EPS (TTM)', fund?.eps_ttm != null ? `$${fund.eps_ttm.toFixed(2)}` : 'N/A'],
-                    ['Revenue (TTM)', fund?.revenue_ttm_fmt || 'N/A'],
+                    ['Synthetic EPS (TTM)', fund?.eps_ttm != null ? `$${fund.eps_ttm.toFixed(2)}` : 'N/A'],
+                    ['Synthetic Revenue', fund?.revenue_ttm_fmt || 'N/A'],
                     [
                       'Revenue Growth (YoY)',
-                      fund?.revenue_growth_yoy_pct != null ? `${fund.revenue_growth_yoy_pct >= 0 ? '+' : ''}${fund.revenue_growth_yoy_pct.toFixed(1)}%` : 'N/A',
+                      fund?.revenue_growth_yoy_pct != null
+                        ? `${fund.revenue_growth_yoy_pct >= 0 ? '+' : ''}${fund.revenue_growth_yoy_pct.toFixed(1)}%`
+                        : 'N/A',
                     ],
-                    ['Net Income (TTM)', fund?.net_income_ttm_fmt || 'N/A'],
-                    [
-                      'Net Profit Margin',
-                      fund?.profit_margin_pct != null ? `${fund.profit_margin_pct.toFixed(1)}%` : 'N/A',
-                    ],
-                    [
-                      'Gross Margin',
-                      fund?.gross_margin_pct != null ? `${fund.gross_margin_pct.toFixed(1)}%` : 'N/A',
-                    ],
-                    [
-                      'Dividend Yield',
-                      fund?.dividend_yield_pct != null ? `${fund.dividend_yield_pct.toFixed(2)}%` : 'N/A',
-                    ],
-                    ['Beta (vs S&P 500)', fund?.beta != null ? fund.beta.toFixed(2) : 'N/A'],
+                    ['Gross Margin', fund?.gross_margin_pct != null ? `${fund.gross_margin_pct.toFixed(1)}%` : 'N/A'],
+                    ['Profit Margin', fund?.profit_margin_pct != null ? `${fund.profit_margin_pct.toFixed(1)}%` : 'N/A'],
+                    ['Beta (vs MSX 500)', fund?.beta != null ? fund.beta.toFixed(2) : 'N/A'],
                     ['EWMA Annualized Vol', `${fc.annualized_volatility_pct.toFixed(1)}%`],
                     ['52-Week High / Low', `$${fund?.week52_high.toFixed(2)} / $${fund?.week52_low.toFixed(2)}`],
-                    ['20-Day Avg Volume', fund ? fund.avg_volume_20d.toLocaleString() : 'N/A'],
-                    ['Next Earnings Date', fund?.next_earnings_date || 'Not Scheduled'],
-                    ['Earnings Timing', fund?.earnings_timing || '—'],
+                    ['20-Candle Avg Vol', fund ? fund.avg_volume_20d.toLocaleString() : 'N/A'],
                   ].map(([label, val]) => (
                     <div key={label} className="border-b border-ink-100 pb-2">
                       <dt className="text-[11px] text-ink-500">{label}</dt>
@@ -417,16 +417,14 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
                 </dl>
               </section>
 
-              {/* Quantitative Factor Attribution & Evidence Audit (7 cols) */}
               <section className="lg:col-span-7 rounded-lg border border-ink-200 bg-white p-5 space-y-5">
                 <div className="border-b border-ink-200 pb-3">
                   <h2 className="text-sm font-semibold text-[#111111]">
-                    Quantitative Factor Attribution &amp; Evidence Separation
+                    Quantitative Candlestick Factor Attribution
                   </h2>
                   <p className="mt-0.5 text-xs text-ink-500">{fc.model_selection_reason}</p>
                 </div>
 
-                {/* Factor bars */}
                 <div className="space-y-2">
                   {fc.factor_contributions.slice(0, 6).map((f) => {
                     const absW = Math.min(100, Math.abs(f.standardized_weight) * 900);
@@ -463,11 +461,10 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
                   })}
                 </div>
 
-                {/* Measured Facts vs Model Assumptions */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-ink-200">
                   <div className="rounded-md border border-ink-200 bg-ink-50/50 p-3.5">
                     <h3 className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#111111]">
-                      Measured Market Facts
+                      Observed Candle Facts
                     </h3>
                     <ul className="mt-2 space-y-1.5 text-xs text-ink-700 leading-relaxed">
                       {fc.measured_facts.map((fact, idx) => (
@@ -478,7 +475,7 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
 
                   <div className="rounded-md border border-ink-200 bg-ink-50/50 p-3.5">
                     <h3 className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#111111]">
-                      Statistical Model Assumptions
+                      Stochastic Model Assumptions
                     </h3>
                     <ul className="mt-2 space-y-1.5 text-xs text-ink-500 leading-relaxed">
                       {fc.model_assumptions.map((assump, idx) => (
@@ -490,45 +487,35 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
               </section>
             </div>
 
-            {/* Dated Financial News & Developments */}
-            <section className="rounded-lg border border-ink-200 bg-white p-5">
-              <div className="flex items-center justify-between border-b border-ink-200 pb-3">
-                <h2 className="text-sm font-semibold text-[#111111]">
-                  Dated Market Developments &amp; Catalysts ({analysis.instrument.ticker})
-                </h2>
-                <span className="text-[11px] text-ink-400">Verified dated headlines only — never synthesized</span>
-              </div>
+            {/* Synthetic Company Catalysts */}
+            {analysis.news_developments.length > 0 && (
+              <section className="rounded-lg border border-ink-200 bg-white p-5">
+                <div className="flex items-center justify-between border-b border-ink-200 pb-3">
+                  <h2 className="text-sm font-semibold text-[#111111]">
+                    Generated Company Events &amp; Catalysts ({analysis.instrument.ticker})
+                  </h2>
+                  <span className="text-[11px] text-ink-400">Procedural synthetic wire</span>
+                </div>
 
-              {analysis.news_developments.length === 0 ? (
-                <p className="py-6 text-xs text-ink-500">
-                  No dated company-specific announcements in the current snapshot for {analysis.instrument.ticker}.
-                  Connect a live Finnhub API key in Feed Settings for real-time company news wires.
-                </p>
-              ) : (
                 <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
                   {analysis.news_developments.map((item, idx) => (
-                    <article key={idx} className="rounded-md border border-ink-200 p-4 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-ink-400">
-                          <span>
-                            {item.published_at} · {item.source}
-                          </span>
-                          <span className="uppercase rounded border border-ink-200 px-1.5 py-0.5 text-[10px] text-ink-700">
-                            {item.category}
-                          </span>
-                        </div>
-                        <h3 className="mt-1.5 text-sm font-semibold text-[#111111] leading-snug">
-                          {item.headline}
-                        </h3>
-                        <p className="mt-1.5 text-xs text-ink-500 leading-relaxed">{item.summary}</p>
+                    <article key={idx} className="rounded-md border border-ink-200 p-4">
+                      <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-ink-400">
+                        <span>
+                          {item.published_at} · {item.source}
+                        </span>
+                        <span className="uppercase rounded border border-ink-200 px-1.5 py-0.5 text-[10px] text-ink-700">
+                          {item.category}
+                        </span>
                       </div>
+                      <h3 className="mt-1.5 text-sm font-semibold text-[#111111] leading-snug">{item.headline}</h3>
+                      <p className="mt-1.5 text-xs text-ink-500 leading-relaxed">{item.summary}</p>
                     </article>
                   ))}
                 </div>
-              )}
-            </section>
+              </section>
+            )}
 
-            {/* Responsible Forecasting Footnote */}
             <div className="rounded-lg border border-ink-200 bg-ink-50 px-4 py-3 text-xs text-ink-500 flex items-center justify-between gap-4">
               <span>{SITE_COPY.responsibleDisclosure.shortBanner}</span>
               <button
@@ -536,7 +523,7 @@ export const MarketAnalystView: React.FC<MarketAnalystViewProps> = ({
                 onClick={onNavigateForecasts}
                 className="shrink-0 inline-flex items-center gap-1 font-medium text-[#111111] hover:underline"
               >
-                <span>Inspect Walk-Forward Evaluation</span>
+                <span>Open AI Accuracy Scoreboard</span>
                 <ExternalLink className="h-3 w-3" />
               </button>
             </div>

@@ -1,7 +1,5 @@
-"""Generates honest, evidence-attributed quantitative explanations, risks, and invalidation triggers.
-
-Strictly separates measured historical/fundamental facts from model assumptions.
-Never uses LLM self-confidence or invents unsupported market facts.
+"""Generates evidence-attributed quantitative explanations, risks, and invalidation triggers
+for procedurally generated synthetic stocks.
 """
 
 from __future__ import annotations
@@ -45,132 +43,109 @@ def build_forecast_explanation(
     mkt_alpha = float(latest_row.get("market_alpha_21d", 0.0)) * 100.0
     beta60 = float(latest_row.get("rolling_beta_60", 1.0))
 
-    # 1. Key Reasons (3-5 strongest quantitative drivers ranked by absolute weight)
     sorted_factors = sorted(factor_contributions, key=lambda f: abs(f.standardized_weight), reverse=True)
     key_reasons: list[str] = []
 
-    # Trend structure reason
     dist50_pct = (close_p / sma50 - 1.0) * 100.0
     dist200_pct = (close_p / sma200 - 1.0) * 100.0
     if close_p >= sma50 and sma50 >= sma200:
         key_reasons.append(
-            f"Constructive multi-timeframe trend structure: {ticker} trades {dist50_pct:+.1f}% vs its 50-day SMA "
-            f"(${sma50:.2f}) and {dist200_pct:+.1f}% above its 200-day SMA (${sma200:.2f})."
+            f"Constructive multi-timeframe candle trend: {ticker} trades {dist50_pct:+.1f}% vs its 50-candle SMA "
+            f"(${sma50:.2f}) and {dist200_pct:+.1f}% above its 200-candle SMA (${sma200:.2f})."
         )
     elif close_p < sma50 and sma50 < sma200:
         key_reasons.append(
-            f"Compressed trend alignment: spot price (${close_p:.2f}) remains {abs(dist50_pct):.1f}% below its 50-day SMA "
-            f"(${sma50:.2f}) and below long-term 200-day trend (${sma200:.2f})."
+            f"Compressed trend alignment: latest candle (${close_p:.2f}) sits {abs(dist50_pct):.1f}% below its 50-candle SMA "
+            f"(${sma50:.2f}) and below 200-candle trend (${sma200:.2f})."
         )
     else:
         key_reasons.append(
-            f"Transitional trend regime: {ticker} sits {dist50_pct:+.1f}% relative to its 50-day SMA (${sma50:.2f}) "
-            f"while long-term 200-day support rests at ${sma200:.2f}."
+            f"Transitional candle regime: {ticker} sits {dist50_pct:+.1f}% relative to its 50-candle SMA (${sma50:.2f}) "
+            f"with long-term 200-candle support at ${sma200:.2f}."
         )
 
-    # Sector & benchmark relative strength
     key_reasons.append(
-        f"21-day relative performance vs {sector_etf} sector benchmark is {sec_rel:+.2f}%, with beta-adjusted "
-        f"idiosyncratic excess return of {mkt_alpha:+.2f}% against S&P 500 (rolling 60d beta {beta60:.2f})."
+        f"21-candle relative spread vs {sector_etf} synthetic sector index is {sec_rel:+.2f}%, with beta-adjusted "
+        f"alpha of {mkt_alpha:+.2f}% against MSX 500 (rolling 60d beta {beta60:.2f})."
     )
 
-    # Momentum / Oscillator state
     if rsi14 >= 68.0:
         key_reasons.append(
-            f"14-day Wilder RSI reads {rsi14:.1f} (elevated momentum / near overbought territory), "
-            f"tempering short-horizon upside extrapolation via mean-reversion damping."
+            f"14-candle Wilder RSI reads {rsi14:.1f} (elevated momentum / overbought zone), "
+            f"applying mean-reversion damping to short-horizon upside extrapolation."
         )
     elif rsi14 <= 34.0:
         key_reasons.append(
-            f"14-day Wilder RSI reads {rsi14:.1f} (oversold compression after a {ret_21d:+.1f}% 21-day move), "
-            f"historically associated with tactical mean-reversion stabilization."
+            f"14-candle Wilder RSI reads {rsi14:.1f} (oversold compression after a {ret_21d:+.1f}% 21-candle move), "
+            f"increasing probability of tactical mean-reversion bounce."
         )
     else:
         key_reasons.append(
-            f"Balanced momentum oscillator (RSI-14 at {rsi14:.1f} after a {ret_21d:+.1f}% 21-day return), "
-            f"indicating trend participation without extreme exhaustion."
+            f"Balanced momentum oscillator (RSI-14 at {rsi14:.1f} after a {ret_21d:+.1f}% 21-candle move), "
+            f"showing directional participation without extreme exhaustion."
         )
 
-    # Volatility & Fundamental context
     if fundamentals.pe_trailing is not None and fundamentals.revenue_growth_yoy_pct is not None:
         fwd_str = f", forward P/E {fundamentals.pe_forward:.1f}x" if fundamentals.pe_forward else ""
         key_reasons.append(
-            f"Fundamental valuation & growth context: {fundamentals.pe_trailing:.1f}x trailing P/E{fwd_str} "
-            f"paired with {fundamentals.revenue_growth_yoy_pct:+.1f}% YoY TTM revenue growth."
+            f"Synthetic fundamental profile: {fundamentals.pe_trailing:.1f}x trailing P/E{fwd_str} "
+            f"paired with {fundamentals.revenue_growth_yoy_pct:+.1f}% YoY revenue growth."
         )
     else:
         key_reasons.append(
             f"Conditional EWMA annualized volatility stands at {vol_ann:.1f}%, calibrating the 68% "
-            f"{horizon_label.lower()} forecast range to ${range_68_low:.2f}–${range_68_high:.2f}."
+            f"{horizon_label.lower()} forecast cone to ${range_68_low:.2f}–${range_68_high:.2f}."
         )
 
     if earnings_in_window and earnings_date_in_window:
         key_reasons.append(
-            f"Scheduled earnings release ({earnings_date_in_window}) falls inside this {horizon_days}-session "
-            f"horizon; conformal interval widened to incorporate discrete earnings-jump variance."
+            f"Synthetic earnings event ({earnings_date_in_window}) falls inside this {horizon_days}-candle "
+            f"window; conformal range widened to absorb jump variance."
         )
-    elif sorted_factors:
+    elif sorted_factors and len(key_reasons) < 5:
         top_f = sorted_factors[0]
-        if len(key_reasons) < 5:
-            key_reasons.append(f"Primary quantitative factor contribution: {top_f.name} ({top_f.measured_value}) — {top_f.description}")
+        key_reasons.append(f"Top weighted factor: {top_f.name} ({top_f.measured_value}) — {top_f.description}")
 
-    # 2. Measured Facts (strictly observed data, zero speculation)
     measured_facts: list[str] = [
-        f"Last recorded close: ${close_p:.2f}; 52-week trading range: ${fundamentals.week52_low:.2f} – ${fundamentals.week52_high:.2f}.",
-        f"20-day SMA: ${sma20:.2f} · 50-day SMA: ${sma50:.2f} · 200-day SMA: ${sma200:.2f} · RSI(14): {rsi14:.1f}.",
-        f"RiskMetrics EWMA annualized volatility: {vol_ann:.1f}% · 20-day average volume: {fundamentals.avg_volume_20d:,} shares.",
-        f"Chronological walk-forward backtest ({sample_size} out-of-sample windows): {directional_acc_pct:.1f}% directional hit rate, {mae_skill_pct:+.2f}% MAE skill vs No-Change baseline.",
+        f"Latest candle close: ${close_p:.2f}; 52-week synthetic range: ${fundamentals.week52_low:.2f} – ${fundamentals.week52_high:.2f}.",
+        f"20-SMA: ${sma20:.2f} · 50-SMA: ${sma50:.2f} · 200-SMA: ${sma200:.2f} · RSI(14): {rsi14:.1f}.",
+        f"EWMA annualized volatility: {vol_ann:.1f}% · 20-candle average volume: {fundamentals.avg_volume_20d:,} shares.",
+        f"Chronological walk-forward backtest ({sample_size} out-of-sample windows): {directional_acc_pct:.1f}% hit rate, {mae_skill_pct:+.2f}% MAE skill vs No-Change.",
     ]
     if fundamentals.market_cap_fmt and fundamentals.revenue_ttm_fmt:
         measured_facts.append(
-            f"Reported TTM revenue: {fundamentals.revenue_ttm_fmt} · Market cap: {fundamentals.market_cap_fmt} "
-            f"(as of {fundamentals.fundamentals_as_of})."
+            f"Synthetic TTM revenue: {fundamentals.revenue_ttm_fmt} · Market cap: {fundamentals.market_cap_fmt}."
         )
-    if news:
-        latest_n = news[0]
-        measured_facts.append(f"Dated catalyst ({latest_n.published_at}, {latest_n.source}): {latest_n.headline}.")
 
-    # 3. Model Assumptions
     model_assumptions: list[str] = [
-        "Assumes short-to-medium term factor relationships estimated via L2-regularized walk-forward regression remain stationary over the forecast window.",
-        f"Prediction intervals (${range_68_low:.2f}–${range_68_high:.2f} at 68% confidence) scale out-of-sample split-conformal residual quantiles by current EWMA volatility ({vol_ann:.1f}% annualized).",
-        "Unscheduled macro shocks, regulatory rulings, M&A announcements, or off-cycle guidance revisions are outside historical price/fundamental covariates.",
+        "Forecast is inferred strictly from past candlestick features without access to future random candle shocks.",
+        f"68% forecast cone (${range_68_low:.2f}–${range_68_high:.2f}) scales split-conformal residuals by EWMA volatility ({vol_ann:.1f}% ann.).",
+        "Stochastic candle simulation includes random fat-tailed shocks and regime shifts that can override historical trend signals.",
     ]
 
-    # 4. Risks & Invalidation Conditions
     invalidation_down = round(min(sma50, range_68_low), 2)
     invalidation_up = round(max(sma20, range_68_high), 2)
     risks: list[str] = []
 
-    if earnings_in_window and earnings_date_in_window:
-        risks.append(
-            f"Binary event gap risk: {company_name} reports earnings on {earnings_date_in_window}. Post-earnings price gaps frequently exceed diffusive daily volatility."
-        )
-
     if direction == "upside":
         risks.append(
-            f"Trend invalidation level: a decisive daily close below ${invalidation_down:.2f} (50-day trend / lower conformal boundary) would negate the constructive outlook."
+            f"Upside invalidation level: a candle close below ${invalidation_down:.2f} breaks 50-candle support and flips short-term momentum."
         )
     elif direction == "downside":
         risks.append(
-            f"Downside thesis invalidation: a sustained breakout above ${invalidation_up:.2f} on above-average volume would invalidate bearish momentum assumptions."
+            f"Downside invalidation level: a candle close above ${invalidation_up:.2f} invalidates bearish momentum."
         )
     else:
         risks.append(
-            f"Range-breakout risk: directional conviction is muted ({expected_return_pct:+.2f}% expected return); a breakout outside ${range_68_low:.2f}–${range_68_high:.2f} would shift regime."
+            f"Range-breakout risk: directional conviction is muted ({expected_return_pct:+.2f}%); random volatility spikes can push price outside ${range_68_low:.2f}–${range_68_high:.2f}."
         )
 
-    if beta60 >= 1.35:
+    if beta60 >= 1.3:
         risks.append(
-            f"High market-beta sensitivity (60d beta {beta60:.2f}): broad S&P 500 or Nasdaq drawdowns and rate/VIX spikes disproportionately amplify {ticker} downside."
+            f"Elevated beta ({beta60:.2f}): swings in the MSX 500 synthetic market amplify {ticker} candle variance."
         )
-    if fundamentals.pe_trailing and fundamentals.pe_trailing >= 38.0:
-        risks.append(
-            f"Valuation multiple compression risk: at {fundamentals.pe_trailing:.1f}x trailing earnings, modest growth deceleration or higher Treasury yields can compress multiples rapidly."
-        )
-    if len(risks) < 3:
-        risks.append(
-            "Regime transition risk: sudden correlation spikes across equity sectors can temporarily degrade historical factor skill."
-        )
+    risks.append(
+        "Stochastic candle risk: every simulated future candle draws independent random GARCH volatility shocks — test the AI live using Run Candle Progress."
+    )
 
-    return key_reasons[:5], measured_facts[:6], model_assumptions, risks[:4]
+    return key_reasons[:5], measured_facts[:5], model_assumptions, risks[:4]

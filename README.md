@@ -1,98 +1,55 @@
 # MARKET / SIGNAL
 
-**See the market from a different perspective.**
+**Procedural Random Stock Generator, Quantitative AI Forecasting & Live Candlestick Verification**
 
-**MARKET / SIGNAL** is a minimalist black-and-white quantitative stock analysis and AI-assisted forecasting platform. It combines real historical and live market data, technical trend/volatility structure, company fundamentals, scheduled earnings catalysts, and horizon-purged chronological walk-forward backtesting to estimate where equity prices might move next — and how reliable each estimate actually is.
+> *“Made because of what my friend Tanish said.”*
 
----
-
-## Core Capabilities
-
-- **Refined Monochrome Interface**: Designed around pure `#FFFFFF` surfaces, `#111111` typography, hairline `#E4E4E7` borders, tabular numerals, and restrained financial chart highlights (`#15803D` upside, `#B91C1C` downside).
-- **AI Market Analyst Workstation**:
-  - Instant search across supported US equities (`NVDA`, `AAPL`, `MSFT`, `GOOGL`, `AMZN`, `TSLA`, `META`, `AMD`, `LLY`, `JPM`, `ORCL`, `WMT`, `XOM`, `UNH`, `NFLX`, `ADBE`, `COST`, `V`, `MA`, `CRM`, `INTC`, etc.), benchmark ETFs (`SPY`, `QQQ`, `DIA`, `IWM`), and GICS sector ETFs.
-  - Interactive vector charting across `1D`, `1W`, `1M`, `3M`, `1Y`, and `5Y` with **Line** and **Candlestick** views, optional **Volume**, **SMA 20 / 50 / 200**, **RSI(14)** subplot, and an interactive **68% / 90% Forecast Cone**.
-- **Multi-Horizon Quantitative Forecasting Engine**:
-  - Evaluates 5 horizons: **Next trading session (`1d`)**, **5 trading days (`5d`)**, **1 month (`21d`)**, **3 months (`63d`)**, and **6 months (`126d`)**.
-  - Uses 16 strictly causal features (multi-scale log returns, SMA trend alignment, normalized MACD, Kaufman efficiency ratio, Wilder RSI-14, RiskMetrics EWMA & Parkinson range volatility, relative volume, rolling 60-day S&P 500 beta/alpha, and GICS sector relative strength).
-  - Selects between **L2-Regularized Factor Ridge**, **Damped Trend/Mean-Reversion State**, and a **Shrinkage Ensemble** *only when chronological walk-forward validation proves lower MAE than simpler models*.
-  - Adjusts forecast intervals via **Out-of-Sample Split-Conformal Residual Quantiles** and widens intervals when confirmed earnings dates fall inside the forecast window.
-- **Accuracy Verification & Forecast Tracking Ledger**:
-  - Chronological walk-forward backtesting with strict `h`-session horizon purging (zero future-data leakage).
-  - Benchmarked directly against **No-Change (Random Walk)** and **Historical-Average Return** baselines across Directional Accuracy, MAE, RMSE, 68%/90% Interval Coverage, Brier Score, Probability Calibration Reliability Bins, and Market Volatility Regimes.
-  - Persistent **Forecast Tracking Ledger** recording prediction timestamp, source price, horizon, range, model version, and realized outcome once elapsed.
-- **Watchlist & Market Overview**:
-  - Add, remove, reorder, customize per-instrument forecast horizons, and refresh watchlists alongside S&P 500, Nasdaq Composite, Dow 30, VIX, and GICS sector breadth.
+**MARKET / SIGNAL** is a minimalist monochrome fintech sandbox that generates 100% synthetic companies with realistic stochastic candlestick histories, computes multi-horizon quantitative AI predictions, and lets you **run future candlesticks randomly in real time** to check whether the AI got its prediction right (`✓ AI GOT IT RIGHT!` vs `✗ AI GOT IT WRONG`).
 
 ---
 
-## Dual Runtime Modes: Full-Stack FastAPI OR 100% Static GitHub Pages
+## Core Features
 
-### 1. Run on GitHub Pages (Zero Backend Required)
+1. **Procedural Random Stock Generator (Zero Real Stocks)**
+   - Click **Random Stock** anywhere in the app (or choose a regime: *Momentum Uptrend*, *Mean-Reverting Range*, *High-Volatility Swings*, *Cycle Turnaround*, or *Bearish Distribution*) to invent a brand-new fictional company with 3+ years of daily & intraday OHLCV candlesticks, synthetic fundamentals, and company catalysts.
+   - Powered by GARCH(1,1) volatility clustering, regime drift, momentum persistence, RSI mean-reversion tension, and fat-tailed random candle shocks.
 
-The repository is pre-configured to run **100% standalone on GitHub Pages** using precomputed Python quantitative snapshots (`frontend/public/static-data/` built into `./docs`) plus `localStorage` persistence for watchlists and live forecast tracking:
+2. **Live Candle Progression & AI Correctness Verification**
+   - Lock in the AI's current forecast (`1`, `5`, `21`, `63`, or `126` candles) and click **Run Candles & Check AI** (or **+1 Candle Check**, or **Auto-Test Loop**).
+   - Watch random green and red candlesticks animate directly across the AI's locked forecast cone.
+   - Immediately checks if the AI predicted the direction accurately (**`✓ AI GOT IT RIGHT!`** / **`✗ AI GOT IT WRONG`**), whether the final candle landed inside the 68% conformal range, and updates your live session win-rate scoreboard and Forecast Tracking Ledger.
 
-- **Option A — GitHub Actions (Recommended)**:
-  1. Go to repository **Settings → Pages**.
-  2. Under **Build and deployment → Source**, select **GitHub Actions**.
-  3. `.github/workflows/deploy-pages.yml` automatically builds and deploys the site.
-- **Option B — Deploy from Branch (`/docs`)**:
-  1. Go to repository **Settings → Pages**.
-  2. Select **Deploy from a branch**, pick your branch (`main`), and choose folder **`/docs`**.
+3. **Quantitative Forecasting & Zero-Leakage Walk-Forward Backtests**
+   - Strictly causal quantitative features (SMA 20/50/200, multi-scale momentum, Wilder RSI-14, EWMA volatility, and synthetic sector/MSX 500 spreads) — the AI never sees upcoming random candle shocks.
+   - Chronological walk-forward backtests comparing directional hit rates, MAE, RMSE, conformal interval coverage, and Brier calibration against No-Change and Historical-Average baselines.
 
-To regenerate the static quantitative snapshots after updating archival data:
-
-```bash
-python3 scripts/export_static_pages_data.py
-cd frontend && npm run build && cp ../docs/index.html ../docs/404.html && touch ../docs/.nojekyll
-```
+4. **Dual Runtime: Full-Stack FastAPI + 100% Standalone GitHub Pages**
+   - Runs seamlessly with the **Python FastAPI** quantitative backend OR **100% client-side in the browser** (`frontend/src/engine/syntheticClientEngine.ts`) so unlimited random stock generation and live candle verification work on static **GitHub Pages** with zero server or API keys required.
 
 ---
 
-### 2. Run Full-Stack Locally (FastAPI Quantitative Server + React)
+## Editing Copy & the Origin Story
 
-#### Backend Setup
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r backend/requirements.txt
-
-# Optional: configure server-side live market data keys (never exposed to browser)
-cp backend/.env.example backend/.env
-# Edit FINNHUB_API_KEY, ALPHAVANTAGE_API_KEY, or TWELVEDATA_API_KEY
-
-uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
-```
-
-Once running at `http://localhost:8000`, FastAPI serves both the `/api/*` quantitative endpoints and the compiled frontend from `./docs`.
-
-#### Frontend Hot-Reload Development
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Vite runs at `http://localhost:5173` and proxies `/api/*` requests to `http://127.0.0.1:8000`.
-
-#### Run Automated Test Suite
-
-```bash
-.venv/bin/pytest -v
-```
-
----
-
-## Customizing Editorial Copy
-
-To edit headlines, disclosures, or the personal origin story (*“Made because Danish asked.”*), update:
-
+All brand copy and the **“Made because of what my friend Tanish said.”** origin story live in a single clean configuration file:
 - `frontend/src/config/siteCopy.ts`
 
 ---
 
-## Responsible Forecasting Notice
+## Running Locally (Full-Stack FastAPI + React)
 
-MARKET / SIGNAL is an analytical decision-support and quantitative research tool — not financial advice or a guarantee of investment returns. All forecasts are probabilistic estimates subject to macroeconomic shifts, earnings surprises, and unscheduled events outside historical model covariates.
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements.txt
+
+cd frontend
+npm install
+npm run build
+cd ..
+
+.venv/bin/uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+```
+
+## Deploying to GitHub Pages
+
+1. **GitHub Actions (Automated)**: Go to **Settings → Pages → Source** and choose **GitHub Actions** (`.github/workflows/deploy-pages.yml`).
+2. **Deploy from Branch `/docs` Folder**: Select branch `main` (or `arena/22872617-stockai`) and folder **`/docs`** (pre-built with `.nojekyll`, `404.html`, and relative asset paths).

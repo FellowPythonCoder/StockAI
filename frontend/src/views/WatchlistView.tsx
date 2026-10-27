@@ -5,6 +5,7 @@ import {
   ArrowRight,
   ArrowUp,
   ArrowUpRight,
+  Dices,
   Minus,
   Plus,
   RefreshCw,
@@ -22,6 +23,7 @@ interface WatchlistViewProps {
   onReorder: (tickers: string[]) => Promise<void>;
   onChangeItemHorizon: (ticker: string, horizon: HorizonCode) => Promise<void>;
   onOpenStock: (ticker: string, horizon: HorizonCode) => void;
+  onGenerateAndAddRandom: () => Promise<void>;
   onRefreshAll: () => Promise<void>;
   loading: boolean;
 }
@@ -33,6 +35,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
   onReorder,
   onChangeItemHorizon,
   onOpenStock,
+  onGenerateAndAddRandom,
   onRefreshAll,
   loading,
 }) => {
@@ -87,29 +90,41 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-ink-200 pb-6">
         <div>
           <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-500">
-            PERSISTENT PORTFOLIO MONITOR
+            SYNTHETIC PORTFOLIO MONITOR
           </div>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-[#111111] sm:text-3xl">
-            Watchlist &amp; Horizon Signals
+            Generated Stocks Watchlist
           </h1>
           <p className="mt-1 text-sm text-ink-500">
-            Track selected equities, customize forecast horizons per instrument, reorder priority, and refresh
-            quantitative estimates.
+            Save favorite procedurally generated stocks, customize AI candle horizons, or generate a brand-new stock
+            directly into your watchlist.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={onRefreshAll}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 rounded-md border border-ink-200 bg-white px-4 py-2 text-xs font-medium text-[#111111] hover:border-[#111111] disabled:opacity-50"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>{loading ? 'Refreshing...' : 'Refresh Forecasts'}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onGenerateAndAddRandom}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md bg-[#111111] px-3.5 py-2 text-xs font-medium text-white hover:bg-ink-700 disabled:opacity-50"
+          >
+            <Dices className="h-3.5 w-3.5" />
+            <span>+ Generate Random Stock</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onRefreshAll}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-ink-200 bg-white px-3.5 py-2 text-xs font-medium text-[#111111] hover:border-[#111111] disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
-      {/* Add Stock Form */}
+      {/* Add Synthetic Stock Form */}
       <div className="relative rounded-lg border border-ink-200 bg-ink-50/60 p-4">
         <form
           onSubmit={(e) => {
@@ -123,7 +138,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
               type="text"
               value={tickerInput}
               onChange={(e) => handleInputChange(e.target.value)}
-              placeholder="Add stock by ticker or company name (e.g. AMD, LLY, COST, META, JPM)..."
+              placeholder="Add synthetic stock (e.g. VELX, KRNL, MRDN, OBLX, or invent any 4-letter ticker)..."
               className="w-full rounded-md border border-ink-200 bg-white px-3.5 py-2 text-xs text-[#111111] placeholder:text-ink-400 focus:border-[#111111] focus:outline-none"
             />
             {suggestions.length > 0 && (
@@ -165,7 +180,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
             className="inline-flex items-center justify-center gap-1.5 rounded-md bg-[#111111] px-4 py-2 text-xs font-medium text-white hover:bg-ink-700 disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />
-            <span>Add Instrument</span>
+            <span>Add Synthetic Stock</span>
           </button>
         </form>
 
@@ -175,9 +190,9 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
       {/* Watchlist Table */}
       {items.length === 0 ? (
         <div className="rounded-lg border border-ink-200 bg-white p-12 text-center">
-          <div className="text-sm font-medium text-[#111111]">Your watchlist is currently empty</div>
+          <div className="text-sm font-medium text-[#111111]">Your synthetic watchlist is empty</div>
           <p className="mt-1 text-xs text-ink-500">
-            Add instruments above (such as NVDA, AAPL, MSFT, or SPY) to monitor daily moves and quantitative forecasts.
+            Click &ldquo;+ Generate Random Stock&rdquo; above to create and track synthetic stocks.
           </p>
         </div>
       ) : (
@@ -187,22 +202,20 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
               <thead>
                 <tr className="border-b border-ink-200 bg-ink-50/70 text-[11px] font-mono uppercase text-ink-500">
                   <th className="py-3 px-3 w-16">Order</th>
-                  <th className="py-3 px-4">Instrument</th>
-                  <th className="py-3 px-4 text-right">Latest Price</th>
-                  <th className="py-3 px-4 text-right">Daily Change</th>
-                  <th className="py-3 px-4">25D Trend</th>
-                  <th className="py-3 px-4">Forecast Horizon</th>
-                  <th className="py-3 px-4">Forecast Direction</th>
-                  <th className="py-3 px-4 text-right">Expected Range (68%)</th>
-                  <th className="py-3 px-4">Last Analyzed</th>
+                  <th className="py-3 px-4">Synthetic Stock</th>
+                  <th className="py-3 px-4 text-right">Current Price</th>
+                  <th className="py-3 px-4 text-right">Last Candle</th>
+                  <th className="py-3 px-4">25-Candle Spark</th>
+                  <th className="py-3 px-4">AI Horizon</th>
+                  <th className="py-3 px-4">AI Call</th>
+                  <th className="py-3 px-4 text-right">68% Price Cone</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100 text-xs tabular-nums">
                 {items.map((item, idx) => {
                   const chgUp = item.change_pct >= 0;
-                  const fcUp = item.forecast_direction === 'upside';
-                  const fcDown = item.forecast_direction === 'downside';
+                  const fcUp = item.expected_return_pct >= 0;
                   return (
                     <tr key={item.ticker} className="hover:bg-ink-50/60 transition-colors">
                       <td className="py-3 px-3">
@@ -245,11 +258,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                         ${item.latest_price.toFixed(2)}
                       </td>
 
-                      <td
-                        className={`py-3 px-4 text-right font-mono font-medium ${
-                          chgUp ? 'text-up' : 'text-down'
-                        }`}
-                      >
+                      <td className={`py-3 px-4 text-right font-mono font-medium ${chgUp ? 'text-up' : 'text-down'}`}>
                         {chgUp ? '+' : ''}
                         {item.change_pct.toFixed(2)}%
                       </td>
@@ -273,7 +282,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                         >
                           {HORIZON_OPTIONS.map((opt) => (
                             <option key={opt.code} value={opt.code}>
-                              {opt.shortLabel} ({opt.fullLabel})
+                              {opt.shortLabel}
                             </option>
                           ))}
                         </select>
@@ -284,29 +293,25 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                           className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium ${
                             fcUp
                               ? 'border-up-border bg-up-soft text-up'
-                              : fcDown
+                              : item.forecast_direction === 'downside'
                               ? 'border-down-border bg-down-soft text-down'
                               : 'border-ink-200 bg-ink-50 text-ink-700'
                           }`}
                         >
                           {fcUp ? (
                             <ArrowUpRight className="h-3 w-3" />
-                          ) : fcDown ? (
+                          ) : item.forecast_direction === 'downside' ? (
                             <ArrowDownRight className="h-3 w-3" />
                           ) : (
                             <Minus className="h-3 w-3" />
                           )}
-                          {item.direction_label} ({item.expected_return_pct >= 0 ? '+' : ''}
+                          {fcUp ? 'UP' : 'DOWN'} ({item.expected_return_pct >= 0 ? '+' : ''}
                           {item.expected_return_pct.toFixed(2)}%)
                         </span>
                       </td>
 
                       <td className="py-3 px-4 text-right font-mono text-[#111111]">
                         ${item.range_low.toFixed(2)} – ${item.range_high.toFixed(2)}
-                      </td>
-
-                      <td className="py-3 px-4 font-mono text-[11px] text-ink-400">
-                        {item.last_analyzed_at.slice(0, 16).replace('T', ' ')}
                       </td>
 
                       <td className="py-3 px-4 text-right">
@@ -316,7 +321,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                             onClick={() => onOpenStock(item.ticker, item.preferred_horizon)}
                             className="inline-flex items-center gap-1 rounded border border-ink-200 px-2.5 py-1 text-[11px] font-medium text-[#111111] hover:border-[#111111]"
                           >
-                            <span>Analyze</span>
+                            <span>Run Candles</span>
                             <ArrowRight className="h-3 w-3" />
                           </button>
                           <button

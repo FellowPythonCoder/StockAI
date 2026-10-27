@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Search, X } from 'lucide-react';
+import { ArrowRight, Dices, Search, X } from 'lucide-react';
 import { InstrumentSummary } from '../types';
 import { searchInstruments } from '../api/client';
 
@@ -7,14 +7,16 @@ interface SearchCommandModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectTicker: (ticker: string) => void;
+  onGenerateRandomStock: () => void;
 }
 
-const POPULAR_TICKERS = ['NVDA', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'AMD', 'LLY', 'JPM', 'SPY'];
+const SYNTHETIC_QUICK = ['VELX', 'KRNL', 'AETH', 'NEXO', 'SLST', 'CYPH', 'MRDN', 'OBLX', 'VRGX', 'HLIX', 'MSX'];
 
 export const SearchCommandModal: React.FC<SearchCommandModalProps> = ({
   isOpen,
   onClose,
   onSelectTicker,
+  onGenerateRandomStock,
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<InstrumentSummary[]>([]);
@@ -47,7 +49,7 @@ export const SearchCommandModal: React.FC<SearchCommandModalProps> = ({
         .finally(() => {
           if (!cancelled) setLoading(false);
         });
-    }, 80);
+    }, 60);
 
     return () => {
       cancelled = true;
@@ -95,7 +97,7 @@ export const SearchCommandModal: React.FC<SearchCommandModalProps> = ({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by ticker symbol or company name (e.g. NVDA, Apple, Microsoft)..."
+            placeholder="Search synthetic company or type any fictional 4-letter ticker to generate..."
             className="w-full bg-transparent text-sm text-[#111111] placeholder:text-ink-400 focus:outline-none"
           />
           <button
@@ -108,33 +110,50 @@ export const SearchCommandModal: React.FC<SearchCommandModalProps> = ({
           </button>
         </div>
 
-        <div className="border-b border-ink-100 bg-ink-50 px-4 py-2 flex items-center gap-1.5 overflow-x-auto">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-ink-400 mr-1 shrink-0">
-            Quick:
-          </span>
-          {POPULAR_TICKERS.map((sym) => (
-            <button
-              key={sym}
-              type="button"
-              onClick={() => {
-                onSelectTicker(sym);
-                onClose();
-              }}
-              className="rounded border border-ink-200 bg-white px-2 py-0.5 text-[11px] font-mono font-medium text-[#111111] hover:border-[#111111] transition-colors shrink-0"
-            >
-              {sym}
-            </button>
-          ))}
+        <div className="border-b border-ink-100 bg-ink-50 px-4 py-2.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-ink-400 mr-1 shrink-0">
+              Synthetic:
+            </span>
+            {SYNTHETIC_QUICK.map((sym) => (
+              <button
+                key={sym}
+                type="button"
+                onClick={() => {
+                  onSelectTicker(sym);
+                  onClose();
+                }}
+                className="rounded border border-ink-200 bg-white px-2 py-0.5 text-[11px] font-mono font-medium text-[#111111] hover:border-[#111111] transition-colors shrink-0"
+              >
+                {sym}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onGenerateRandomStock();
+            }}
+            className="inline-flex items-center gap-1 rounded bg-[#111111] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-ink-700 shrink-0"
+          >
+            <Dices className="h-3 w-3" />
+            <span>Random</span>
+          </button>
         </div>
 
-        <div className="max-h-[360px] overflow-y-auto divide-y divide-ink-100">
+        <div className="max-h-[340px] overflow-y-auto divide-y divide-ink-100">
           {loading && results.length === 0 ? (
-            <div className="px-4 py-8 text-center text-xs text-ink-500">Searching supported instruments...</div>
+            <div className="px-4 py-8 text-center text-xs text-ink-500">Searching synthetic stock universe...</div>
           ) : results.length === 0 ? (
-            <div className="px-4 py-8 text-center">
-              <p className="text-sm font-medium text-[#111111]">No matching instrument in local catalog</p>
-              <p className="mt-1 text-xs text-ink-500">
-                Press Enter to query <span className="font-mono font-semibold">{query.toUpperCase()}</span> via live provider if configured.
+            <div className="px-4 py-8 text-center space-y-2">
+              <p className="text-sm font-medium text-[#111111]">
+                Create synthetic ticker <span className="font-mono font-bold">{query.toUpperCase()}</span>?
+              </p>
+              <p className="text-xs text-ink-500">
+                Press Enter to procedurally generate a brand-new company and candlestick history for{' '}
+                <span className="font-mono">{query.toUpperCase()}</span>.
               </p>
             </div>
           ) : (
@@ -166,7 +185,7 @@ export const SearchCommandModal: React.FC<SearchCommandModalProps> = ({
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="rounded border border-ink-200 px-1.5 py-0.5 text-[10px] font-medium text-ink-500">
-                      {item.asset_type}
+                      Synthetic {item.asset_type}
                     </span>
                     <ArrowRight className={`h-3.5 w-3.5 ${active ? 'text-[#111111]' : 'text-ink-400'}`} />
                   </div>
@@ -177,8 +196,8 @@ export const SearchCommandModal: React.FC<SearchCommandModalProps> = ({
         </div>
 
         <div className="flex items-center justify-between border-t border-ink-200 bg-ink-50 px-4 py-2 text-[11px] text-ink-500">
-          <span>↑↓ Navigate · Enter to Analyze · Esc to Close</span>
-          <span>US Equities &amp; Index ETFs</span>
+          <span>↑↓ Navigate · Enter to Open / Generate · Esc to Close</span>
+          <span>100% Procedural Synthetic Stocks</span>
         </div>
       </div>
     </div>

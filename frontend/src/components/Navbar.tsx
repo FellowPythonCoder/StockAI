@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Dices, Menu, Search, SlidersHorizontal, X } from 'lucide-react';
 import { BrandLogo } from './BrandLogo';
 import { DataProvenance } from '../types';
 
@@ -9,14 +9,16 @@ interface NavbarProps {
   activeTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   onOpenSearch: () => void;
+  onGenerateRandomStock: () => void;
   onOpenFeedSettings: () => void;
   provenance?: DataProvenance | null;
+  generatingStock?: boolean;
 }
 
 const NAV_ITEMS: { id: NavTab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
-  { id: 'analysis', label: 'Market Analysis' },
-  { id: 'forecasts', label: 'Forecasts' },
+  { id: 'analysis', label: 'Candle Simulator' },
+  { id: 'forecasts', label: 'AI Accuracy' },
   { id: 'watchlist', label: 'Watchlist' },
   { id: 'about', label: 'About' },
 ];
@@ -25,19 +27,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   onSelectTab,
   onOpenSearch,
+  onGenerateRandomStock,
   onOpenFeedSettings,
-  provenance,
+  generatingStock = false,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  const badgeLabel = (() => {
-    if (!provenance) return 'Initializing Feed';
-    if (provenance.mode === 'live') return 'Live Feed';
-    if (provenance.mode === 'delayed') return 'Delayed Feed';
-    if (provenance.mode === 'cached') return 'Cached Feed';
-    if (provenance.provider_name.includes('GitHub Pages')) return 'Static Snapshot · Demo';
-    return 'Historical Snapshot · Demo';
-  })();
 
   return (
     <header className="sticky top-0 z-40 border-b border-ink-200 bg-white/95 backdrop-blur-sm">
@@ -71,36 +65,38 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={onOpenFeedSettings}
-            title="View market data source status and API configuration"
-            className="hidden lg:inline-flex items-center gap-2 rounded-md border border-ink-200 bg-white px-2.5 py-1 text-[11px] font-medium text-ink-700 hover:border-ink-400 transition-colors"
+            title="View procedural candle engine details"
+            className="hidden xl:inline-flex items-center gap-2 rounded-md border border-ink-200 bg-white px-2.5 py-1 text-[11px] font-medium text-ink-700 hover:border-ink-400 transition-colors"
           >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                provenance?.mode === 'live'
-                  ? 'bg-up'
-                  : provenance?.is_demo_or_archive
-                  ? 'bg-ink-400'
-                  : 'bg-[#111111]'
-              }`}
-            />
-            <span>{badgeLabel}</span>
+            <span className="h-1.5 w-1.5 rounded-full bg-up" />
+            <span>Synthetic Engine</span>
             <SlidersHorizontal className="h-3 w-3 text-ink-400" />
           </button>
 
           <button
             type="button"
             onClick={onOpenSearch}
-            className="inline-flex items-center gap-2 rounded-md bg-[#111111] px-3.5 py-1.5 text-[13px] font-medium text-white hover:bg-ink-700 transition-colors"
+            className="hidden sm:inline-flex items-center gap-1.5 rounded-md border border-ink-200 bg-white px-3 py-1.5 text-[13px] font-medium text-[#111111] hover:border-[#111111] transition-colors"
           >
             <Search className="h-3.5 w-3.5" />
-            <span>Analyze a Stock</span>
-            <kbd className="hidden sm:inline-block rounded border border-white/20 bg-white/10 px-1.5 py-0.2 text-[10px] font-mono text-white/80">
+            <span>Stocks</span>
+            <kbd className="hidden lg:inline-block rounded border border-ink-200 bg-ink-50 px-1.5 py-0.2 text-[10px] font-mono text-ink-500">
               /
             </kbd>
+          </button>
+
+          <button
+            type="button"
+            onClick={onGenerateRandomStock}
+            disabled={generatingStock}
+            className="inline-flex items-center gap-1.5 rounded-md bg-[#111111] px-3.5 py-1.5 text-[13px] font-medium text-white hover:bg-ink-700 disabled:opacity-50 transition-colors"
+          >
+            <Dices className="h-3.5 w-3.5" />
+            <span>{generatingStock ? 'Generating...' : 'Random Stock'}</span>
           </button>
 
           <button
@@ -139,12 +135,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               onClick={() => {
                 setMobileOpen(false);
-                onOpenFeedSettings();
+                onOpenSearch();
               }}
-              className="mt-2 flex items-center justify-between rounded-md border border-ink-200 px-3 py-2 text-xs text-ink-700"
+              className="mt-1 flex items-center justify-between rounded-md border border-ink-200 px-3 py-2 text-xs text-[#111111]"
             >
-              <span>Feed Status: {badgeLabel}</span>
-              <SlidersHorizontal className="h-3.5 w-3.5" />
+              <span>Search Synthetic Stocks</span>
+              <Search className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>

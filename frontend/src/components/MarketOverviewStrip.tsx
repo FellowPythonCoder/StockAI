@@ -101,18 +101,18 @@ export const MarketOverviewStrip: React.FC<MarketOverviewStripProps> = ({
         {overview.indices.map(renderIndexCard)}
       </div>
 
-      {/* GICS Sector Performance Strip */}
+      {/* Synthetic Sector Performance Strip */}
       {showSectors && overview.sectors.length > 0 && (
         <div className="rounded-lg border border-ink-200 bg-white p-3.5">
           <div className="flex items-center justify-between mb-2.5">
             <span className="text-[11px] font-mono uppercase tracking-wider text-ink-500">
-              GICS Sector ETFs · Daily &amp; 1M Relative Performance
+              Synthetic Sector Indices · Daily &amp; 21-Candle Performance
             </span>
             <span className="text-[11px] text-ink-500">
               Breadth: {overview.breadth_advancing_sectors}/{overview.breadth_total_sectors} advancing
             </span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
             {overview.sectors.map((sec) => {
               const up = sec.change_pct >= 0;
               return (

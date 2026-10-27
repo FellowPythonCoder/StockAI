@@ -1,9 +1,11 @@
-"""High-level orchestration service combining data retrieval, forecasting, evaluation, and tracking."""
+"""High-level orchestration service combining procedural stock generation, candle progression,
+quantitative forecasting, walk-forward evaluation, and live AI verification.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from . import MODEL_VERSION
 from .evaluation.backtest import HORIZON_SPECS
@@ -11,9 +13,14 @@ from .forecasting.engine import generate_horizon_forecast_and_backtest
 from .providers.cache import market_cache
 from .providers.router import market_router
 from .schemas import (
+    CandleAdvanceResponse,
+    CandleCheckVerdict,
+    GenerateStockResponse,
+    HorizonBacktestReport,
     HorizonCode,
     HorizonForecast,
-    HorizonBacktestReport,
+    LockedForecastSnapshot,
+    RegimeArchetype,
     StockAnalysisResponse,
     WatchlistItemOut,
 )
@@ -28,14 +35,15 @@ def compute_all_horizons_for_ticker(
 ) -> tuple[dict[HorizonCode, tuple[HorizonForecast, HorizonBacktestReport]], object, object, object, object]:
     sym = ticker.upper().strip()
     inst = market_router.get_instrument_summary(sym)
+    sym = inst.ticker
     daily_df, prov = market_router.get_daily_series(sym, force_refresh=force_refresh)
-    spy_df, _ = market_router.get_daily_series("SPY", force_refresh=False)
+    msx_df, _ = market_router.get_daily_series("MSX", force_refresh=False)
     sec_etf, sec_df = market_router.get_sector_benchmark_series(inst.sector)
     fundamentals = market_router.get_fundamentals(sym, daily_df)
     news = market_router.get_news(sym)
 
     last_bar_dt = str(daily_df["date"].iloc[-1])
-    analysis_cache_key = f"quant:{sym}:{last_bar_dt}:{MODEL_VERSION}"
+    analysis_cache_key = f"quant:{sym}:{last_bar_dt}:{len(daily_df)}:{MODEL_VERSION}"
 
     if not force_refresh:
         cached = market_cache.get(analysis_cache_key)
@@ -48,7 +56,7 @@ def compute_all_horizons_for_ticker(
             ticker=sym,
             company_name=inst.name,
             stock_df=daily_df,
-            spy_df=spy_df,
+            spy_df=msx_df,
             sector_etf=sec_etf,
             sector_df=sec_df,
             fundamentals=fundamentals,
@@ -72,6 +80,7 @@ def build_stock_analysis(
     horizon_map, inst, daily_df, prov, (fundamentals, news) = compute_all_horizons_for_ticker(
         sym, force_refresh=force_refresh
     )
+    sym = inst.ticker
 
     fc, bt = horizon_map[horizon]
 
@@ -129,6 +138,127 @@ def build_stock_analysis(
     )
 
 
+def create_random_stock_and_analyze(
+    regime: RegimeArchetype = "random",
+    sector: Optional[str] = None,
+    custom_ticker: Optional[str] = None,
+    custom_name: Optional[str] = None,
+    horizon: HorizonCode = "5d",
+    timeframe: Literal["1D", "1W", "1M", "3M", "1Y", "5Y"] = "3M",
+) -> GenerateStockResponse:
+    new_ticker = market_router.generate_random_stock(
+        regime=regime,
+        sector=sector,
+        custom_ticker=custom_ticker,
+        custom_name=custom_name,
+    )
+    analysis = build_stock_analysis(new_ticker, horizon=horizon, force_refresh=True, record_to_ledger=True)
+    chart = market_router.get_chart_series(new_ticker, timeframe=timeframe, force_refresh=True)
+    return GenerateStockResponse(analysis=analysis, chart=chart)
+
+
+def advance_candles_and_verify_ai(
+    ticker: str,
+    horizon: HorizonCode = "5d",
+    steps: Optional[int] = None,
+    timeframe: Literal["1D", "1W", "1M", "3M", "1Y", "5Y"] = "3M",
+) -> CandleAdvanceResponse:
+    sym = ticker.upper().strip()
+    inst = market_router.get_instrument_summary(sym)
+    sym = inst.ticker
+
+    eval_horizon: HorizonCode = "1d" if steps == 1 else horizon
+    pre_analysis = build_stock_analysis(sym, horizon=eval_horizon, force_refresh=False, record_to_ledger=True)
+    locked_fc = pre_analysis.forecast
+    actual_steps = int(steps) if steps is not None else locked_fc.horizon_trading_days
+
+    locked_snapshot = LockedForecastSnapshot(
+        ticker=sym,
+        horizon_code=locked_fc.horizon_code,
+        horizon_label=locked_fc.horizon_label,
+        steps_evaluated=actual_steps,
+        starting_price=locked_fc.starting_price,
+        starting_date=locked_fc.starting_date,
+        target_date=locked_fc.target_date,
+        predicted_direction=locked_fc.direction,
+        direction_label=locked_fc.direction_label,
+        expected_return_pct=locked_fc.expected_return_pct,
+        expected_price=locked_fc.expected_price,
+        range_68_low=locked_fc.range_68_low,
+        range_68_high=locked_fc.range_68_high,
+        range_90_low=locked_fc.range_90_low,
+        range_90_high=locked_fc.range_90_high,
+        prob_higher=locked_fc.prob_higher,
+        trajectory=locked_fc.trajectory,
+    )
+
+    generated_bars = market_router.advance_candles(sym, steps=actual_steps)
+    updated_daily_df, _ = market_router.get_daily_series(sym, force_refresh=True)
+    tracking_store.resolve_pending_outcomes(sym, updated_daily_df)
+
+    start_p = locked_fc.starting_price
+    end_p = generated_bars[-1].close if generated_bars else start_p
+    end_dt = generated_bars[-1].time[:10] if generated_bars else locked_fc.starting_date
+    chg_dollar = round(end_p - start_p, 2)
+    actual_ret_pct = round((end_p / start_p - 1.0) * 100.0, 2) if start_p > 0 else 0.0
+
+    pred_up = locked_fc.expected_return_pct >= 0.0
+    ai_got_it_right = (pred_up and end_p >= start_p) or ((not pred_up) and end_p < start_p)
+    within_68 = locked_fc.range_68_low <= end_p <= locked_fc.range_68_high
+
+    call_word = "UP" if pred_up else "DOWN"
+    candle_word = "candle" if actual_steps == 1 else "candles"
+    range_note = " Landed inside the 68% forecast cone." if within_68 else " Finished outside the 68% cone."
+
+    if ai_got_it_right:
+        verdict_badge = "AI GOT IT RIGHT"
+        verdict_summary = (
+            f"AI got it right! Predicted {call_word} ({locked_fc.expected_return_pct:+.2f}% from ${start_p:.2f}) "
+            f"and {actual_steps} random {candle_word} closed at ${end_p:.2f} ({actual_ret_pct:+.2f}%).{range_note}"
+        )
+    else:
+        verdict_badge = "AI GOT IT WRONG"
+        verdict_summary = (
+            f"AI got it wrong — predicted {call_word} ({locked_fc.expected_return_pct:+.2f}% from ${start_p:.2f}), "
+            f"but {actual_steps} random {candle_word} moved to ${end_p:.2f} ({actual_ret_pct:+.2f}%)."
+        )
+
+    verdict = CandleCheckVerdict(
+        ticker=sym,
+        company_name=inst.name,
+        horizon_code=locked_fc.horizon_code,
+        horizon_label=locked_fc.horizon_label,
+        steps_ran=actual_steps,
+        start_date=locked_fc.starting_date,
+        end_date=end_dt,
+        start_price=start_p,
+        end_price=end_p,
+        actual_change_dollar=chg_dollar,
+        actual_return_pct=actual_ret_pct,
+        predicted_direction=locked_fc.direction,
+        predicted_return_pct=locked_fc.expected_return_pct,
+        predicted_price=locked_fc.expected_price,
+        range_68_low=locked_fc.range_68_low,
+        range_68_high=locked_fc.range_68_high,
+        within_68_range=within_68,
+        ai_got_it_right=ai_got_it_right,
+        verdict_badge=verdict_badge,
+        verdict_summary=verdict_summary,
+        checked_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+
+    updated_analysis = build_stock_analysis(sym, horizon=horizon, force_refresh=True, record_to_ledger=True)
+    updated_chart = market_router.get_chart_series(sym, timeframe=timeframe, force_refresh=True)
+
+    return CandleAdvanceResponse(
+        locked_forecast=locked_snapshot,
+        generated_bars=generated_bars,
+        verdict=verdict,
+        updated_analysis=updated_analysis,
+        updated_chart=updated_chart,
+    )
+
+
 def build_watchlist_view(force_refresh: bool = False) -> list[WatchlistItemOut]:
     entries = tracking_store.list_watchlist_entries()
     items: list[WatchlistItemOut] = []
@@ -170,11 +300,10 @@ def build_watchlist_view(force_refresh: bool = False) -> list[WatchlistItemOut]:
 
 
 def seed_initial_audit_history() -> None:
-    """Seeds walk-forward verified historical forecasts for core stocks so Forecast History is immediately useful."""
     existing = tracking_store.list_tracked_forecasts(limit=5)
     if existing:
         return
-    for sym in ["NVDA", "AAPL", "MSFT", "GOOGL"]:
+    for sym in ["VELX", "KRNL", "AETH", "NEXO"]:
         try:
             build_stock_analysis(sym, horizon="5d", force_refresh=False, record_to_ledger=True)
         except Exception:

@@ -6,34 +6,43 @@
 export const SITE_COPY = {
   brand: {
     name: 'MARKET / SIGNAL',
-    tagline: 'Quantitative Equity Research & Calibrated Forecasting',
+    tagline: 'Procedural Stock Generator & AI Candle Forecast Verification',
   },
   hero: {
-    eyebrow: 'QUANTITATIVE MARKET INTELLIGENCE',
+    eyebrow: 'PROCEDURAL CANDLE ENGINE · LIVE AI VERIFICATION',
     headline: 'See the market from a different perspective.',
     supportingText:
-      'AI-powered stock analysis combining market data, historical trends, financial fundamentals, and quantitative forecasting to help you understand what might happen next.',
-    primaryCta: 'Start Analyzing',
-    secondaryCta: 'Explore the Dashboard',
+      'Generate synthetic stocks with realistic candlestick histories, let the quantitative AI forecast the next move, and run random future candles live on the chart to check whether the AI got it right.',
+    primaryCta: 'Generate Random Stock',
+    secondaryCta: 'Explore the Simulator',
   },
   personalStory: {
     eyebrow: 'ORIGIN',
-    heading: 'Made because Danish asked.',
-    body: 'I made this because my friend Danish wanted me to build a tool that uses AI to predict stock movements. What started as an idea became a project to explore how artificial intelligence, financial data, and quantitative analysis can work together to make market research smarter.',
-    footnote: 'Designed around empirical walk-forward verification, transparent baselines, and calibrated uncertainty.',
+    heading: 'Made because of what my friend Tanish said.',
+    body: 'I made this because my friend Tanish said I should build a tool that uses AI to predict stock movements. Instead of pulling real-world tickers, it pairs a random stock generator with stochastic candlestick simulation—turning what my friend Tanish said into an interactive lab where you can run future candles forward and immediately see if the AI got it right.',
+    footnote: 'Inspired by what my friend Tanish said — built with walk-forward calibration, conformal volatility cones, and live candle verification.',
   },
   responsibleDisclosure: {
     shortBanner:
-      'Forecasts are probabilistic quantitative estimates derived from historical market data and fundamentals — not investment advice or a guarantee of future returns.',
+      '100% synthetic stock generator & educational AI sandbox — all tickers, companies, and candlestick movements are procedurally simulated and never represent real securities or investment advice.',
     detailedStatement:
-      'Equity prices are influenced by macroeconomic shifts, earnings surprises, liquidity shocks, and unscheduled events that statistical models cannot anticipate. MARKET / SIGNAL evaluates every horizon via chronological walk-forward backtesting without future-data leakage, compares error rates against No-Change and Historical-Average baselines, and reports calibrated intervals rather than certainty.',
+      'Every company, ticker symbol, fundamental snapshot, and candlestick series on MARKET / SIGNAL is procedurally generated using multi-regime GARCH(1,1) volatility clustering, momentum persistence, and fat-tailed random shocks. The AI forecasting model evaluates strictly past candles without seeing future random shocks, allowing you to advance candles randomly and test its directional accuracy honestly.',
   },
 } as const;
 
 export const HORIZON_OPTIONS = [
-  { code: '1d' as const, shortLabel: '1 Session', fullLabel: 'Next trading session' },
-  { code: '5d' as const, shortLabel: '5D', fullLabel: '5 trading days' },
-  { code: '21d' as const, shortLabel: '1M', fullLabel: '1 month' },
-  { code: '63d' as const, shortLabel: '3M', fullLabel: '3 months' },
-  { code: '126d' as const, shortLabel: '6M', fullLabel: '6 months' },
+  { code: '1d' as const, shortLabel: '1 Candle', fullLabel: 'Next candle (1d)', candles: 1 },
+  { code: '5d' as const, shortLabel: '5 Candles', fullLabel: '5 candles (5d)', candles: 5 },
+  { code: '21d' as const, shortLabel: '21 Candles', fullLabel: '21 candles (1M)', candles: 21 },
+  { code: '63d' as const, shortLabel: '63 Candles', fullLabel: '63 candles (3M)', candles: 63 },
+  { code: '126d' as const, shortLabel: '126 Candles', fullLabel: '126 candles (6M)', candles: 126 },
+];
+
+export const REGIME_OPTIONS = [
+  { code: 'random' as const, label: 'Surprise Me (Random Regime)' },
+  { code: 'momentum_up' as const, label: 'Momentum Uptrend' },
+  { code: 'mean_reverting' as const, label: 'Mean-Reverting Range' },
+  { code: 'high_vol' as const, label: 'High-Volatility Swings' },
+  { code: 'turnaround' as const, label: 'Cycle Turnaround' },
+  { code: 'downtrend' as const, label: 'Bearish Distribution' },
 ];

@@ -1,4 +1,4 @@
-"""Pydantic schemas for the MARKET / SIGNAL API."""
+"""Pydantic schemas for the MARKET / SIGNAL Procedural Stock & Quantitative Forecasting API."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ DataFeedMode = Literal["live", "delayed", "cached", "archival_demo", "unavailabl
 ForecastDirection = Literal["upside", "downside", "mixed"]
 HorizonCode = Literal["1d", "5d", "21d", "63d", "126d"]
 DataQualityLevel = Literal["High", "Medium", "Limited"]
+RegimeArchetype = Literal["random", "momentum_up", "mean_reverting", "high_vol", "turnaround", "downtrend"]
 
 
 class DataProvenance(BaseModel):
@@ -30,7 +31,7 @@ class InstrumentSummary(BaseModel):
     asset_type: Literal["Equity", "ETF", "Index"]
     sector: str
     industry: str
-    has_intraday: bool = False
+    has_intraday: bool = True
 
 
 class CandleBar(BaseModel):
@@ -203,6 +204,78 @@ class ChartSeriesResponse(BaseModel):
     fallback_notice: Optional[str] = None
     provenance: DataProvenance
     bars: list[CandleBar]
+
+
+class GenerateStockRequest(BaseModel):
+    regime: RegimeArchetype = "random"
+    sector: Optional[str] = None
+    custom_ticker: Optional[str] = None
+    custom_name: Optional[str] = None
+    horizon: HorizonCode = "5d"
+    timeframe: Literal["1D", "1W", "1M", "3M", "1Y", "5Y"] = "3M"
+
+
+class GenerateStockResponse(BaseModel):
+    analysis: StockAnalysisResponse
+    chart: ChartSeriesResponse
+
+
+class CandleAdvanceRequest(BaseModel):
+    horizon: HorizonCode = "5d"
+    steps: Optional[int] = Field(default=None, ge=1, le=126)
+    timeframe: Literal["1D", "1W", "1M", "3M", "1Y", "5Y"] = "3M"
+
+
+class LockedForecastSnapshot(BaseModel):
+    ticker: str
+    horizon_code: HorizonCode
+    horizon_label: str
+    steps_evaluated: int
+    starting_price: float
+    starting_date: str
+    target_date: str
+    predicted_direction: ForecastDirection
+    direction_label: str
+    expected_return_pct: float
+    expected_price: float
+    range_68_low: float
+    range_68_high: float
+    range_90_low: float
+    range_90_high: float
+    prob_higher: Optional[float] = None
+    trajectory: list[ForecastTrajectoryPoint]
+
+
+class CandleCheckVerdict(BaseModel):
+    ticker: str
+    company_name: str
+    horizon_code: HorizonCode
+    horizon_label: str
+    steps_ran: int
+    start_date: str
+    end_date: str
+    start_price: float
+    end_price: float
+    actual_change_dollar: float
+    actual_return_pct: float
+    predicted_direction: ForecastDirection
+    predicted_return_pct: float
+    predicted_price: float
+    range_68_low: float
+    range_68_high: float
+    within_68_range: bool
+    ai_got_it_right: bool
+    verdict_badge: str
+    verdict_summary: str
+    checked_at: str
+
+
+class CandleAdvanceResponse(BaseModel):
+    locked_forecast: LockedForecastSnapshot
+    generated_bars: list[CandleBar]
+    verdict: CandleCheckVerdict
+    updated_analysis: StockAnalysisResponse
+    updated_chart: ChartSeriesResponse
 
 
 class WatchlistItemOut(BaseModel):
